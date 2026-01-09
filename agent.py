@@ -200,8 +200,9 @@ async def run_autonomous_agent(
         if status == "continue":
             delay_seconds = AUTO_CONTINUE_DELAY_SECONDS
             target_time_str = None
+
             if response.lower().strip().startswith("limit reached"):
-                print("Agent indicated limit reached.")
+                print("Claude Agent SDK indicated limit reached.")
 
                 # Try to parse reset time from response
                 match = re.search(
@@ -241,7 +242,7 @@ async def run_autonomous_agent(
 
             if target_time_str:
                 print(
-                    f"\nAgent will auto-continue in {delay_seconds:.0f}s ({target_time_str})...",
+                    f"\nClaude Code Limit Reached. Agent will auto-continue in {delay_seconds:.0f}s ({target_time_str})...",
                     flush=True,
                 )
             else:
@@ -249,8 +250,8 @@ async def run_autonomous_agent(
                     f"\nAgent will auto-continue in {delay_seconds:.0f}s...", flush=True
                 )
 
+            sys.stdout.flush()  # this should allow the pause to be displayed before sleeping
             print_progress_summary(project_dir)
-            sys.stdout.flush()
             await asyncio.sleep(delay_seconds)
 
         elif status == "error":
