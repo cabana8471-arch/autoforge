@@ -16,6 +16,27 @@ from pathlib import Path
 WEBHOOK_URL = os.environ.get("PROGRESS_N8N_WEBHOOK_URL")
 PROGRESS_CACHE_FILE = ".progress_cache"
 
+# SQLite connection settings for parallel mode safety
+SQLITE_TIMEOUT = 30  # seconds to wait for locks
+SQLITE_BUSY_TIMEOUT_MS = 30000  # milliseconds for PRAGMA busy_timeout
+
+
+def _get_connection(db_file: Path) -> sqlite3.Connection:
+    """Get a SQLite connection with proper timeout settings.
+
+    Uses timeout=30s and PRAGMA busy_timeout=30000 for safe operation
+    in parallel mode where multiple processes access the same database.
+
+    Args:
+        db_file: Path to the SQLite database file
+
+    Returns:
+        sqlite3.Connection with proper timeout settings
+    """
+    conn = sqlite3.connect(db_file, timeout=SQLITE_TIMEOUT)
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+    return conn
+
 
 def has_features(project_dir: Path) -> bool:
     """
@@ -31,8 +52,6 @@ def has_features(project_dir: Path) -> bool:
 
     Returns False if no features exist (initializer needs to run).
     """
-    import sqlite3
-
     # Check legacy JSON file first
     json_file = project_dir / "feature_list.json"
     if json_file.exists():
@@ -44,7 +63,7 @@ def has_features(project_dir: Path) -> bool:
         return False
 
     try:
-        conn = sqlite3.connect(db_file)
+        conn = _get_connection(db_file)
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM features")
         count = cursor.fetchone()[0]
@@ -59,6 +78,8 @@ def count_passing_tests(project_dir: Path) -> tuple[int, int, int]:
     """
     Count passing, in_progress, and total tests via direct database access.
 
+    Uses connection with proper timeout settings for parallel mode safety.
+
     Args:
         project_dir: Directory containing the project
 
@@ -70,7 +91,7 @@ def count_passing_tests(project_dir: Path) -> tuple[int, int, int]:
         return 0, 0, 0
 
     try:
-        conn = sqlite3.connect(db_file)
+        conn = _get_connection(db_file)
         cursor = conn.cursor()
         # Single aggregate query instead of 3 separate COUNT queries
         # Handle case where in_progress column doesn't exist yet (legacy DBs)
@@ -109,6 +130,8 @@ def get_all_passing_features(project_dir: Path) -> list[dict]:
     """
     Get all passing features for webhook notifications.
 
+    Uses connection with proper timeout settings for parallel mode safety.
+
     Args:
         project_dir: Directory containing the project
 
@@ -120,7 +143,7 @@ def get_all_passing_features(project_dir: Path) -> list[dict]:
         return []
 
     try:
-        conn = sqlite3.connect(db_file)
+        conn = _get_connection(db_file)
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id, category, name FROM features WHERE passes = 1 ORDER BY priority ASC"
