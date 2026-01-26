@@ -41,7 +41,7 @@ from sqlalchemy import text
 # Add parent directory to path so we can import from api module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from api.database import Feature, create_database, atomic_transaction
+from api.database import atomic_transaction, create_database, Feature
 from api.dependency_resolver import (
     MAX_DEPENDENCIES_PER_FEATURE,
     compute_scheduling_scores,
@@ -423,7 +423,7 @@ def feature_mark_in_progress(
                 return json.dumps({"error": f"Feature with ID {feature_id} is already passing"})
             if feature.in_progress:
                 return json.dumps({"error": f"Feature with ID {feature_id} is already in-progress"})
-            return json.dumps({"error": f"Failed to mark feature in-progress for unknown reason"})
+            return json.dumps({"error": "Failed to mark feature in-progress for unknown reason"})
 
         # Fetch the claimed feature
         feature = session.query(Feature).filter(Feature.id == feature_id).first()
