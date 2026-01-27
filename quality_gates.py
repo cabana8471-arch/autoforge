@@ -230,23 +230,39 @@ def run_type_check(project_dir: Path) -> QualityCheckResult:
     }
 
 
-def run_custom_script(project_dir: Path, script_path: str | None = None) -> QualityCheckResult | None:
+def run_custom_script(
+    project_dir: Path,
+    script_path: str | None = None,
+    explicit_config: bool = False,
+) -> QualityCheckResult | None:
     """
     Run a custom quality check script.
 
     Args:
         project_dir: Path to the project directory
         script_path: Path to the script (relative to project), defaults to .autocoder/quality-checks.sh
+        explicit_config: If True, user explicitly configured this script, so missing = error
 
     Returns:
-        QualityCheckResult, or None if script doesn't exist
+        QualityCheckResult, or None if default script doesn't exist
     """
+    user_configured = script_path is not None or explicit_config
+
     if script_path is None:
         script_path = ".autocoder/quality-checks.sh"
 
     script_full_path = project_dir / script_path
 
     if not script_full_path.exists():
+        if user_configured:
+            # User explicitly configured a script that doesn't exist - return error
+            return {
+                "name": "custom_script",
+                "passed": False,
+                "output": f"Configured script not found: {script_path}",
+                "duration_ms": 0,
+            }
+        # Default script doesn't exist - that's OK, skip silently
         return None
 
     # Make sure it's executable
@@ -309,7 +325,11 @@ def verify_quality(
             all_passed = False
 
     if run_custom:
-        custom_result = run_custom_script(project_dir, custom_script_path)
+        custom_result = run_custom_script(
+            project_dir,
+            custom_script_path,
+            explicit_config=custom_script_path is not None,
+        )
         if custom_result is not None:
             checks["custom_script"] = custom_result
             if not custom_result["passed"]:
