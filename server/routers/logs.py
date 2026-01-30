@@ -275,7 +275,7 @@ async def export_logs(request: ExportRequest):
 
         count = query.export_logs(
             output_path=output_path,
-            format=request.format,
+            output_format=request.format,
             level=request.level,
             agent_id=request.agent_id,
             feature_id=request.feature_id,

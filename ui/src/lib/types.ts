@@ -15,10 +15,34 @@ export interface ProjectSummary {
   path: string
   has_spec: boolean
   stats: ProjectStats
+  is_detached?: boolean  // True if Autocoder files moved to backup
 }
 
 export interface ProjectDetail extends ProjectSummary {
   prompts_dir: string
+}
+
+// Detach/Reattach types
+export interface DetachResponse {
+  success: boolean
+  files_moved: number
+  backup_size: number
+  backup_path: string
+  message: string
+}
+
+export interface ReattachResponse {
+  success: boolean
+  files_restored: number
+  message: string
+}
+
+export interface DetachStatusResponse {
+  is_detached: boolean
+  backup_exists: boolean
+  backup_size?: number
+  detached_at?: string
+  file_count?: number
 }
 
 // Filesystem types

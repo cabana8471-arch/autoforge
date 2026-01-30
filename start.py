@@ -30,6 +30,7 @@ from registry import (
     list_registered_projects,
     register_project,
 )
+import detach as detach_module
 
 
 def check_spec_exists(project_dir: Path) -> bool:
@@ -88,6 +89,7 @@ def display_menu(projects: list[tuple[str, Path]]) -> None:
 
     if projects:
         print("[2] Continue existing project")
+        print("[3] Detach/Reattach project")
 
     print("[q] Quit")
     print()
@@ -369,6 +371,73 @@ def create_new_project_flow() -> tuple[str, Path] | None:
     return project_name, project_dir
 
 
+def display_detach_menu(projects: list[tuple[str, Path]]) -> None:
+    """Display the detach/reattach menu."""
+    print("\n" + "-" * 40)
+    print("  Detach/Reattach Projects")
+    print("-" * 40)
+    print("\nDetached projects have Autocoder files moved to backup,")
+    print("allowing Claude Code to run without restrictions.\n")
+
+    for i, (name, path) in enumerate(projects, 1):
+        is_detached = detach_module.is_project_detached(path)
+        status = "DETACHED" if is_detached else "attached"
+        print(f"  [{i}] [{status:8}] {name}")
+
+    print("\n  [b] Back to main menu")
+    print()
+
+
+def handle_detach_reattach(projects: list[tuple[str, Path]]) -> None:
+    """Handle detach/reattach flow for projects."""
+    while True:
+        display_detach_menu(projects)
+
+        choice = input("Select project number: ").strip().lower()
+
+        if choice == 'b':
+            return
+
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(projects):
+                project_name, project_path = projects[idx]
+                handle_project_detach_action(project_name, project_path)
+            else:
+                print(f"Please enter a number between 1 and {len(projects)}")
+        except ValueError:
+            print("Invalid input. Enter a number or 'b' to go back.")
+
+
+def handle_project_detach_action(project_name: str, project_path: Path) -> None:
+    """Handle detach or reattach action for a single project."""
+    is_detached = detach_module.is_project_detached(project_path)
+
+    print(f"\nProject: {project_name}")
+    print(f"Path: {project_path}")
+    print(f"Status: {'DETACHED' if is_detached else 'attached'}")
+
+    if is_detached:
+        # Offer to reattach
+        print("\nThis project is detached. Autocoder files are in backup.")
+        confirm = input("Reattach project (restore files)? [y/N]: ").strip().lower()
+        if confirm == 'y':
+            print("\nReattaching...")
+            success, message, _ = detach_module.reattach_project(project_name)
+            print(f"  {message}")
+    else:
+        # Offer to detach
+        print("\nThis project is attached. Autocoder files are present.")
+        print("Detaching will move files to backup and allow Claude Code full access.")
+        confirm = input("Detach project? [y/N]: ").strip().lower()
+        if confirm == 'y':
+            print("\nDetaching...")
+            success, message, manifest = detach_module.detach_project(project_name)
+            print(f"  {message}")
+
+    input("\nPress Enter to continue...")
+
+
 def run_agent(project_name: str, project_dir: Path) -> None:
     """Run the autonomous agent with the given project.
 
@@ -447,6 +516,9 @@ def main() -> None:
             if selected:
                 project_name, project_dir = selected
                 run_agent(project_name, project_dir)
+
+        elif choice == '3' and projects:
+            handle_detach_reattach(projects)
 
         else:
             print("Invalid option. Please try again.")

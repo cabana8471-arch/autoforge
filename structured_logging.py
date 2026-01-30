@@ -23,6 +23,7 @@ Log Format:
 }
 """
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -30,7 +31,19 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
+
+
+def _format_ts(dt: datetime) -> str:
+    """Format datetime to ISO 8601 with UTC 'Z' suffix.
+
+    Handles both naive datetimes (treated as UTC) and timezone-aware datetimes.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
 
 # Type aliases
 # Note: Python's logging uses "warning" but we normalize to "warn" for consistency
@@ -48,9 +61,9 @@ class StructuredLogEntry:
     feature_id: Optional[int] = None
     tool_name: Optional[str] = None
     duration_ms: Optional[int] = None
-    extra: dict = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary, excluding None values."""
         result = {
             "timestamp": self.timestamp,
@@ -227,7 +240,6 @@ class StructuredLogger:
 
         # Setup logger with unique name per instance to avoid handler accumulation
         # across tests and multiple invocations. Include project path hash for uniqueness.
-        import hashlib
         path_hash = hashlib.md5(str(self.project_dir).encode()).hexdigest()[:8]
         logger_name = f"autocoder.{agent_id or 'main'}.{path_hash}.{id(self)}"
         self.logger = logging.getLogger(logger_name)
@@ -322,7 +334,7 @@ class LogQuery:
         until: Optional[datetime] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         Query logs with filters.
 
@@ -340,11 +352,8 @@ class LogQuery:
         Returns:
             List of log entries as dicts
         """
-        conn = self._connect()
-        cursor = conn.cursor()
-
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if level:
             conditions.append("level = ?")
@@ -363,24 +372,22 @@ class LogQuery:
             params.append(tool_name)
 
         if search:
-            conditions.append("message LIKE ?")
-            # Escape LIKE wildcards to prevent unexpected query behavior
-            escaped_search = search.replace("%", "\\%").replace("_", "\\_")
+            conditions.append("message LIKE ? ESCAPE '\\'")
+            # Escape LIKE wildcards - backslash MUST be escaped first
+            escaped_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             params.append(f"%{escaped_search}%")
 
         if since:
             conditions.append("timestamp >= ?")
-            # Use consistent timestamp format with stored logs (Z suffix for UTC)
-            params.append(since.isoformat().replace("+00:00", "Z"))
+            params.append(_format_ts(since))
 
         if until:
             conditions.append("timestamp <= ?")
-            # Use consistent timestamp format with stored logs (Z suffix for UTC)
-            params.append(until.isoformat().replace("+00:00", "Z"))
+            params.append(_format_ts(until))
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        query = f"""
+        query_sql = f"""
             SELECT * FROM logs
             WHERE {where_clause}
             ORDER BY timestamp DESC
@@ -388,11 +395,11 @@ class LogQuery:
         """
         params.extend([limit, offset])
 
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [dict(row) for row in rows]
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query_sql, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
 
     def count(
         self,
@@ -402,11 +409,8 @@ class LogQuery:
         since: Optional[datetime] = None,
     ) -> int:
         """Count logs matching filters."""
-        conn = self._connect()
-        cursor = conn.cursor()
-
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if level:
             conditions.append("level = ?")
@@ -419,100 +423,95 @@ class LogQuery:
             params.append(feature_id)
         if since:
             conditions.append("timestamp >= ?")
-            # Use consistent timestamp format with stored logs (Z suffix for UTC)
-            params.append(since.isoformat().replace("+00:00", "Z"))
+            params.append(_format_ts(since))
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        cursor.execute(f"SELECT COUNT(*) FROM logs WHERE {where_clause}", params)
-        count = cursor.fetchone()[0]
-        conn.close()
-        return count
+
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) FROM logs WHERE {where_clause}", params)
+            return cursor.fetchone()[0]
 
     def get_timeline(
         self,
         since: Optional[datetime] = None,
         until: Optional[datetime] = None,
         bucket_minutes: int = 5,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         Get activity timeline bucketed by time intervals.
 
         Returns list of buckets with counts per agent.
         """
-        conn = self._connect()
-        cursor = conn.cursor()
-
         # Default to last 24 hours
         if not since:
             since = datetime.now(timezone.utc) - timedelta(hours=24)
         if not until:
             until = datetime.now(timezone.utc)
 
-        cursor.execute(
-            """
-            SELECT
-                strftime('%Y-%m-%d %H:', timestamp) ||
-                printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / ?) * ?) || ':00' as bucket,
-                agent_id,
-                COUNT(*) as count,
-                SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) as errors
-            FROM logs
-            WHERE timestamp >= ? AND timestamp <= ?
-            GROUP BY bucket, agent_id
-            ORDER BY bucket
-            """,
-            (bucket_minutes, bucket_minutes, since.isoformat().replace("+00:00", "Z"), until.isoformat().replace("+00:00", "Z")),
-        )
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    strftime('%Y-%m-%d %H:', timestamp) ||
+                    printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / ?) * ?) || ':00' as bucket,
+                    agent_id,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) as errors
+                FROM logs
+                WHERE timestamp >= ? AND timestamp <= ?
+                GROUP BY bucket, agent_id
+                ORDER BY bucket
+                """,
+                (bucket_minutes, bucket_minutes, _format_ts(since), _format_ts(until)),
+            )
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
 
-        # Group by bucket
-        buckets = {}
-        for row in rows:
-            bucket = row["bucket"]
-            if bucket not in buckets:
-                buckets[bucket] = {"timestamp": bucket, "agents": {}, "total": 0, "errors": 0}
-            agent = row["agent_id"] or "main"
-            buckets[bucket]["agents"][agent] = row["count"]
-            buckets[bucket]["total"] += row["count"]
-            buckets[bucket]["errors"] += row["errors"]
+            # Group by bucket
+            buckets: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                bucket = row["bucket"]
+                if bucket not in buckets:
+                    buckets[bucket] = {"timestamp": bucket, "agents": {}, "total": 0, "errors": 0}
+                agent = row["agent_id"] or "main"
+                buckets[bucket]["agents"][agent] = row["count"]
+                buckets[bucket]["total"] += row["count"]
+                buckets[bucket]["errors"] += row["errors"]
 
-        return list(buckets.values())
+            return list(buckets.values())
 
-    def get_agent_stats(self, since: Optional[datetime] = None) -> list[dict]:
+    def get_agent_stats(self, since: Optional[datetime] = None) -> list[dict[str, Any]]:
         """Get log statistics per agent."""
-        conn = self._connect()
-        cursor = conn.cursor()
-
-        params = []
+        params: list[Any] = []
         where_clause = "1=1"
         if since:
             where_clause = "timestamp >= ?"
-            # Use consistent timestamp format with stored logs (Z suffix for UTC)
-            params.append(since.isoformat().replace("+00:00", "Z"))
+            params.append(_format_ts(since))
 
-        cursor.execute(
-            f"""
-            SELECT
-                agent_id,
-                COUNT(*) as total,
-                SUM(CASE WHEN level = 'info' THEN 1 ELSE 0 END) as info_count,
-                SUM(CASE WHEN level = 'warn' OR level = 'warning' THEN 1 ELSE 0 END) as warn_count,
-                SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) as error_count,
-                MIN(timestamp) as first_log,
-                MAX(timestamp) as last_log
-            FROM logs
-            WHERE {where_clause}
-            GROUP BY agent_id
-            ORDER BY total DESC
-            """,
-            params,
-        )
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT
+                    agent_id,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN level = 'info' THEN 1 ELSE 0 END) as info_count,
+                    SUM(CASE WHEN level = 'warn' OR level = 'warning' THEN 1 ELSE 0 END) as warn_count,
+                    SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) as error_count,
+                    MIN(timestamp) as first_log,
+                    MAX(timestamp) as last_log
+                FROM logs
+                WHERE {where_clause}
+                GROUP BY agent_id
+                ORDER BY total DESC
+                """,
+                params,
+            )
 
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
 
     def _iter_logs(
         self,
@@ -545,7 +544,7 @@ class LogQuery:
     def export_logs(
         self,
         output_path: Path,
-        format: Literal["json", "jsonl", "csv"] = "jsonl",
+        output_format: Literal["json", "jsonl", "csv"] = "jsonl",
         batch_size: int = 1000,
         **filters,
     ) -> int:
@@ -554,7 +553,7 @@ class LogQuery:
 
         Args:
             output_path: Output file path
-            format: Export format (json, jsonl, csv)
+            output_format: Export format (json, jsonl, csv)
             batch_size: Number of rows to fetch per batch (default 1000)
             **filters: Query filters
 
@@ -568,7 +567,7 @@ class LogQuery:
 
         count = 0
 
-        if format == "json":
+        if output_format == "json":
             # For JSON format, we still need to collect all to produce valid JSON
             # but we stream to avoid massive single query
             with open(output_path, "w") as f:
@@ -582,13 +581,13 @@ class LogQuery:
                     count += 1
                 f.write("\n]")
 
-        elif format == "jsonl":
+        elif output_format == "jsonl":
             with open(output_path, "w") as f:
                 for log in self._iter_logs(batch_size=batch_size, **filters):
                     f.write(json.dumps(log) + "\n")
                     count += 1
 
-        elif format == "csv":
+        elif output_format == "csv":
             fieldnames = None
             with open(output_path, "w", newline="") as f:
                 writer = None

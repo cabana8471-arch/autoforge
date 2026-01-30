@@ -6,9 +6,11 @@ Tests for the structured logging system that saves logs to SQLite.
 """
 
 import json
+import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import TestCase
@@ -81,7 +83,6 @@ class TestStructuredLogHandler(TestCase):
 
     def tearDown(self):
         """Clean up temporary files."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_creates_database(self):
@@ -120,7 +121,6 @@ class TestStructuredLogger(TestCase):
 
     def tearDown(self):
         """Clean up temporary files."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_creates_logs_directory(self):
@@ -154,10 +154,11 @@ class TestStructuredLogger(TestCase):
         logger.warn("Test warning")
 
         query = get_log_query(self.project_dir)
-        logs = query.query(level="warning")
+        # Query for "warn" - the normalized level stored in DB (not Python's "warning")
+        logs = query.query(level="warn")
         self.assertEqual(len(logs), 1)
-        # Assert on level field, not message content (more robust)
-        self.assertEqual(logs[0]["level"], "warning")
+        # Assert on level field - stored as "warn" for consistency
+        self.assertEqual(logs[0]["level"], "warn")
 
     def test_log_error(self):
         """Test error level logging."""
@@ -211,7 +212,6 @@ class TestLogQuery(TestCase):
 
     def tearDown(self):
         """Clean up temporary files."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_query_by_level(self):
@@ -301,14 +301,13 @@ class TestLogExport(TestCase):
 
     def tearDown(self):
         """Clean up temporary files."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_export_json(self):
         """Test JSON export."""
         query = get_log_query(self.project_dir)
         output_path = self.export_dir / "logs.json"
-        count = query.export_logs(output_path, format="json")
+        count = query.export_logs(output_path, output_format="json")
 
         self.assertEqual(count, 3)
         self.assertTrue(output_path.exists())
@@ -321,7 +320,7 @@ class TestLogExport(TestCase):
         """Test JSONL export."""
         query = get_log_query(self.project_dir)
         output_path = self.export_dir / "logs.jsonl"
-        count = query.export_logs(output_path, format="jsonl")
+        count = query.export_logs(output_path, output_format="jsonl")
 
         self.assertEqual(count, 3)
         self.assertTrue(output_path.exists())
@@ -337,7 +336,7 @@ class TestLogExport(TestCase):
         """Test CSV export."""
         query = get_log_query(self.project_dir)
         output_path = self.export_dir / "logs.csv"
-        count = query.export_logs(output_path, format="csv")
+        count = query.export_logs(output_path, output_format="csv")
 
         self.assertEqual(count, 3)
         self.assertTrue(output_path.exists())
@@ -359,7 +358,6 @@ class TestThreadSafety(TestCase):
 
     def tearDown(self):
         """Clean up temporary files."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_concurrent_writes(self):
@@ -404,6 +402,7 @@ class TestThreadSafety(TestCase):
             while not write_done.is_set():
                 count = query.count()
                 read_results.append(count)
+                time.sleep(0.01)  # Avoid busy-spin
 
         writer_thread = threading.Thread(target=writer)
         reader_thread = threading.Thread(target=reader)
@@ -433,7 +432,6 @@ class TestCleanup(TestCase):
 
     def tearDown(self):
         """Clean up temporary files."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_cleanup_old_entries(self):
@@ -461,8 +459,8 @@ class TestCleanup(TestCase):
         count = cursor.fetchone()[0]
         conn.close()
 
-        # Should have at most max_entries
-        self.assertLessEqual(count, 10)
+        # Should have exactly max_entries (cleanup guarantees this)
+        self.assertEqual(count, 10)
 
 
 if __name__ == "__main__":
