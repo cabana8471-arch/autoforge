@@ -45,6 +45,7 @@ class ProjectSummary(BaseModel):
     path: str
     has_spec: bool
     stats: ProjectStats
+    default_concurrency: int = 3
 
 
 class ProjectDetail(BaseModel):
@@ -54,6 +55,7 @@ class ProjectDetail(BaseModel):
     has_spec: bool
     stats: ProjectStats
     prompts_dir: str
+    default_concurrency: int = 3
 
 
 class ProjectPrompts(BaseModel):
@@ -68,6 +70,18 @@ class ProjectPromptsUpdate(BaseModel):
     app_spec: str | None = None
     initializer_prompt: str | None = None
     coding_prompt: str | None = None
+
+
+class ProjectSettingsUpdate(BaseModel):
+    """Request schema for updating project-level settings."""
+    default_concurrency: int | None = None
+
+    @field_validator('default_concurrency')
+    @classmethod
+    def validate_concurrency(cls, v: int | None) -> int | None:
+        if v is not None and (v < 1 or v > 5):
+            raise ValueError("default_concurrency must be between 1 and 5")
+        return v
 
 
 # ============================================================================

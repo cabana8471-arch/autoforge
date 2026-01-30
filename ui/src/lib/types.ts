@@ -15,6 +15,7 @@ export interface ProjectSummary {
   path: string
   has_spec: boolean
   stats: ProjectStats
+  default_concurrency: number
 }
 
 export interface ProjectDetail extends ProjectSummary {
@@ -534,6 +535,10 @@ export interface SettingsUpdate {
   yolo_mode?: boolean
   model?: string
   testing_agent_ratio?: number
+}
+
+export interface ProjectSettingsUpdate {
+  default_concurrency?: number
 }
 
 // ============================================================================
