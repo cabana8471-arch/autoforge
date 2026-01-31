@@ -9,7 +9,7 @@
  * 5. Create features in database
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   X,
   Folder,
@@ -65,6 +65,20 @@ export function ImportProjectModal({
 
   const createProject = useCreateProject()
 
+  // Define handleClose early with useCallback so it can be used in useEffect
+  const handleClose = useCallback(() => {
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current)
+      redirectTimeoutRef.current = null
+    }
+    setStep('folder')
+    setProjectName('')
+    setExpandedCategories(new Set())
+    setRegisterError(null)
+    reset()
+    onClose()
+  }, [onClose, reset])
+
   // Expand all categories when features are extracted
   useEffect(() => {
     if (step === 'features' && state.featuresResult) {
@@ -80,6 +94,19 @@ export function ImportProjectModal({
       }
     }
   }, [])
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleClose()
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('keydown', handleKeyDown)
+      return () => document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen, handleClose])
 
   if (!isOpen) return null
 
@@ -147,19 +174,6 @@ export function ImportProjectModal({
     }
   }
 
-  const handleClose = () => {
-    if (redirectTimeoutRef.current) {
-      clearTimeout(redirectTimeoutRef.current)
-      redirectTimeoutRef.current = null
-    }
-    setStep('folder')
-    setProjectName('')
-    setExpandedCategories(new Set())
-    setRegisterError(null)
-    reset()
-    onClose()
-  }
-
   const handleBack = () => {
     if (step === 'detected' || step === 'analyzing' || step === 'error') {
       setStep('folder')
@@ -199,7 +213,7 @@ export function ImportProjectModal({
   // Folder selection step
   if (step === 'folder') {
     return (
-      <div className="neo-modal-backdrop" onClick={handleClose}>
+      <div className="neo-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="import-modal-title" onClick={handleClose}>
         <div
           className="neo-modal w-full max-w-3xl max-h-[85vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
@@ -208,7 +222,7 @@ export function ImportProjectModal({
             <div className="flex items-center gap-3">
               <Folder size={24} className="text-[var(--color-neo-progress)]" />
               <div>
-                <h2 className="font-display font-bold text-xl text-[var(--color-neo-text)]">
+                <h2 id="import-modal-title" className="font-display font-bold text-xl text-[var(--color-neo-text)]">
                   Import Existing Project
                 </h2>
                 <p className="text-sm text-[var(--color-neo-text-secondary)]">
@@ -264,8 +278,8 @@ export function ImportProjectModal({
     )
   }
 
-  // Error state
-  if (state.step === 'error') {
+  // Error state (check both local and hook state for consistency)
+  if (step === 'error' || state.step === 'error') {
     return (
       <div className="neo-modal-backdrop" onClick={handleClose}>
         <div
@@ -471,13 +485,13 @@ export function ImportProjectModal({
 
                 {expandedCategories.has(category) && (
                   <div className="ml-6 mt-2 space-y-2">
-                    {featuresByCategory[category]?.map((feature, i) => {
+                    {featuresByCategory[category]?.map((feature) => {
                       const isSelected = state.selectedFeatures.some(
                         f => f.name === feature.name && f.category === feature.category
                       )
                       return (
                         <div
-                          key={i}
+                          key={`${feature.category}-${feature.name}`}
                           onClick={() => toggleFeature(feature)}
                           className={`
                             flex items-start gap-3 p-3 cursor-pointer transition-all

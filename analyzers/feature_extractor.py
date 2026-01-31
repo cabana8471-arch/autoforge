@@ -255,7 +255,9 @@ def extract_features(detection_result: StackDetectionResult) -> FeatureExtractio
 
         # Ensure API endpoints get API-style naming
         name_path = path
-        if not name_path.lstrip("/").startswith("api/"):
+        # Avoid double-prefixing: check for "api" or "api/" at start
+        stripped = name_path.lstrip("/")
+        if stripped != "api" and not stripped.startswith("api/"):
             name_path = f"/api{name_path if name_path.startswith('/') else '/' + name_path}"
         feature_name = _route_to_feature_name(name_path, method)
 

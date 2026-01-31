@@ -113,8 +113,13 @@ class ReactAnalyzer(BaseAnalyzer):
             if (self.project_dir / config_name).exists():
                 config_files.append(config_name)
 
-        # Detect entry point
-        for entry in ["src/main.tsx", "src/main.jsx", "src/index.tsx", "src/index.jsx", "pages/_app.tsx", "app/layout.tsx"]:
+        # Detect entry point (check all common extensions)
+        for entry in [
+            "src/main.tsx", "src/main.ts", "src/main.jsx", "src/main.js",
+            "src/index.tsx", "src/index.ts", "src/index.jsx", "src/index.js",
+            "pages/_app.tsx", "pages/_app.ts", "pages/_app.jsx", "pages/_app.js",
+            "app/layout.tsx", "app/layout.ts", "app/layout.jsx", "app/layout.js",
+        ]:
             if (self.project_dir / entry).exists():
                 entry_point = entry
                 break
@@ -313,8 +318,11 @@ class ReactAnalyzer(BaseAnalyzer):
         """Extract routes from React Router configuration."""
         routes: list[RouteInfo] = []
 
-        # Look for route definitions in common files
-        route_files = self._find_files("**/*.tsx") + self._find_files("**/*.jsx")
+        # Look for route definitions in common files (include all JS/TS extensions)
+        route_files = (
+            self._find_files("**/*.tsx") + self._find_files("**/*.jsx") +
+            self._find_files("**/*.ts") + self._find_files("**/*.js")
+        )
 
         # Pattern for React Router <Route> elements
         route_pattern = re.compile(

@@ -106,7 +106,8 @@ class StackDetector:
                         category = "frontend"
                     elif stack_name in (
                         "express", "fastify", "koa", "nodejs",
-                        "fastapi", "django", "flask", "nestjs"
+                        "fastapi", "django", "flask", "nestjs",
+                        "python",
                     ):
                         category = "backend"
                     elif stack_name in ("postgres", "mysql", "mongodb", "sqlite"):
