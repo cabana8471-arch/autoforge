@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/expand", tags=["expand-project"])
 ROOT_DIR = Path(__file__).parent.parent.parent
 
 
-def _get_project_path(project_name: str) -> Path:
+def _get_project_path(project_name: str) -> Path | None:
     """Get project path from registry."""
     import sys
     root = Path(__file__).parent.parent.parent
