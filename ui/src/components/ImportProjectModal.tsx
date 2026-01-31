@@ -9,7 +9,7 @@
  * 5. Create features in database
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   X,
   Folder,
@@ -33,7 +33,7 @@ import { useImportProject } from '../hooks/useImportProject'
 import { useCreateProject } from '../hooks/useProjects'
 import { FolderBrowser } from './FolderBrowser'
 
-type Step = 'folder' | 'analyzing' | 'detected' | 'features' | 'register' | 'complete'
+type Step = 'folder' | 'analyzing' | 'detected' | 'features' | 'register' | 'complete' | 'error'
 
 interface ImportProjectModalProps {
   isOpen: boolean
@@ -50,6 +50,7 @@ export function ImportProjectModal({
   const [projectName, setProjectName] = useState('')
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [registerError, setRegisterError] = useState<string | null>(null)
+  const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const {
     state,
@@ -71,6 +72,15 @@ export function ImportProjectModal({
     }
   }, [step, state.featuresResult])
 
+  // Cleanup redirect timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current)
+      }
+    }
+  }, [])
+
   if (!isOpen) return null
 
   const handleFolderSelect = async (path: string) => {
@@ -78,6 +88,8 @@ export function ImportProjectModal({
     const success = await analyze(path)
     if (success) {
       setStep('detected')
+    } else {
+      setStep('error')
     }
   }
 
@@ -87,6 +99,8 @@ export function ImportProjectModal({
       setStep('features')
       // Expand all categories by default - need to get fresh state via callback
       // The featuresResult will be available after the state update from extractFeatures
+    } else {
+      setStep('error')
     }
   }
 
@@ -99,25 +113,32 @@ export function ImportProjectModal({
   }
 
   const handleRegisterAndCreate = async () => {
-    if (!projectName.trim() || !state.projectPath) return
+    const trimmedName = projectName.trim()
+    if (!trimmedName || !state.projectPath) return
+
+    // Validate project name format
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmedName)) {
+      setRegisterError('Project name can only contain letters, numbers, hyphens, and underscores')
+      return
+    }
 
     setRegisterError(null)
 
     try {
       // First register the project
       await createProject.mutateAsync({
-        name: projectName.trim(),
+        name: trimmedName,
         path: state.projectPath,
         specMethod: 'manual',
       })
 
       // Then create features
-      const success = await createFeatures(projectName.trim())
+      const success = await createFeatures(trimmedName)
 
       if (success) {
         setStep('complete')
-        setTimeout(() => {
-          onProjectImported(projectName.trim())
+        redirectTimeoutRef.current = setTimeout(() => {
+          onProjectImported(trimmedName)
           handleClose()
         }, 1500)
       }
@@ -127,6 +148,10 @@ export function ImportProjectModal({
   }
 
   const handleClose = () => {
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current)
+      redirectTimeoutRef.current = null
+    }
     setStep('folder')
     setProjectName('')
     setExpandedCategories(new Set())
@@ -136,7 +161,7 @@ export function ImportProjectModal({
   }
 
   const handleBack = () => {
-    if (step === 'detected' || step === 'analyzing') {
+    if (step === 'detected' || step === 'analyzing' || step === 'error') {
       setStep('folder')
       reset()
     } else if (step === 'features') {

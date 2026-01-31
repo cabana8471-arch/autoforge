@@ -150,23 +150,25 @@ class ReactAnalyzer(BaseAnalyzer):
         routes: list[RouteInfo] = []
 
         # Check for App Router (Next.js 13+)
+        # Prefer root directories over src/ to avoid duplicates
         app_dir = self.project_dir / "app"
-        if app_dir.exists():
+        if app_dir.exists() and app_dir.is_dir():
             routes.extend(self._extract_app_router_routes(app_dir))
+        else:
+            # Only check src/app if root app/ doesn't exist
+            src_app = self.project_dir / "src" / "app"
+            if src_app.exists() and src_app.is_dir():
+                routes.extend(self._extract_app_router_routes(src_app))
 
         # Check for Pages Router
         pages_dir = self.project_dir / "pages"
-        if pages_dir.exists():
+        if pages_dir.exists() and pages_dir.is_dir():
             routes.extend(self._extract_pages_router_routes(pages_dir))
-
-        # Also check src/app and src/pages
-        src_app = self.project_dir / "src" / "app"
-        if src_app.exists():
-            routes.extend(self._extract_app_router_routes(src_app))
-
-        src_pages = self.project_dir / "src" / "pages"
-        if src_pages.exists():
-            routes.extend(self._extract_pages_router_routes(src_pages))
+        else:
+            # Only check src/pages if root pages/ doesn't exist
+            src_pages = self.project_dir / "src" / "pages"
+            if src_pages.exists() and src_pages.is_dir():
+                routes.extend(self._extract_pages_router_routes(src_pages))
 
         return routes
 
@@ -254,10 +256,9 @@ class ReactAnalyzer(BaseAnalyzer):
 
         for app_api in app_api_dirs:
             if app_api.exists():
-                for route_file in app_api.rglob("route.ts"):
-                    endpoints.extend(self._parse_app_router_api(route_file, app_api))
-                for route_file in app_api.rglob("route.js"):
-                    endpoints.extend(self._parse_app_router_api(route_file, app_api))
+                for pattern in ("route.ts", "route.js", "route.tsx", "route.jsx"):
+                    for route_file in app_api.rglob(pattern):
+                        endpoints.extend(self._parse_app_router_api(route_file, app_api))
 
         return endpoints
 
@@ -289,8 +290,9 @@ class ReactAnalyzer(BaseAnalyzer):
         methods = []
         if content:
             for method in ["GET", "POST", "PUT", "PATCH", "DELETE"]:
-                if f"export async function {method}" in content or \
-                   f"export function {method}" in content:
+                if (f"export async function {method}" in content or
+                    f"export function {method}" in content or
+                    f"export const {method}" in content):
                     methods.append(method)
 
         if not methods:

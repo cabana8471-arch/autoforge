@@ -7,10 +7,13 @@ Uses multiple analyzers to detect frontend, backend, and database technologies.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import TypedDict
 
 from .base_analyzer import AnalysisResult
+
+logger = logging.getLogger(__name__)
 
 
 class StackInfo(TypedDict):
@@ -125,7 +128,7 @@ class StackDetector:
 
                 except Exception as e:
                     # Log but don't fail - continue with other analyzers
-                    print(f"Warning: {analyzer.stack_name} analyzer failed: {e}")
+                    logger.warning(f"{analyzer.stack_name} analyzer failed: {e}")
 
         # Sort by confidence
         detected_stacks.sort(key=lambda x: x["confidence"], reverse=True)

@@ -13,6 +13,10 @@ from typing import TypedDict
 
 from .stack_detector import StackDetectionResult
 
+# Feature extraction thresholds
+MIN_FEATURES_BEFORE_COMPONENTS = 10
+MAX_COMPONENT_FEATURES = 10
+
 
 class DetectedFeature(TypedDict):
     """A feature extracted from codebase analysis."""
@@ -289,7 +293,11 @@ def extract_features(detection_result: StackDetectionResult) -> FeatureExtractio
         source_file = component.get("file")
 
         # Skip common/generic components
-        skip_names = ["index", "app", "main", "layout", "_app", "_document"]
+        skip_names = [
+            "index", "app", "main", "layout", "_app", "_document",
+            "header", "footer", "sidebar", "navbar", "nav",
+            "loading", "error", "not-found", "404", "500",
+        ]
         if name.lower() in skip_names:
             continue
 
@@ -324,8 +332,8 @@ def extract_features(detection_result: StackDetectionResult) -> FeatureExtractio
             })
 
     # Add component features if we don't have many from routes/endpoints
-    if len(features) < 10:
-        features.extend(component_features[:10])  # Limit to 10 component features
+    if len(features) < MIN_FEATURES_BEFORE_COMPONENTS:
+        features.extend(component_features[:MAX_COMPONENT_FEATURES])
 
     # Add basic infrastructure features
     basic_features = _generate_basic_features(detection_result)
