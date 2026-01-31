@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import TypedDict
 
-from .base_analyzer import AnalysisResult
+from .base_analyzer import AnalysisResult, BaseAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class StackDetector:
             project_dir: Path to the project directory to analyze
         """
         self.project_dir = Path(project_dir).resolve()
-        self._analyzers = []
+        self._analyzers: list[BaseAnalyzer] = []
         self._load_analyzers()
 
     def _load_analyzers(self) -> None:
