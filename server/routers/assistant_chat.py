@@ -145,9 +145,9 @@ async def create_project_conversation(project_name: str):
 
     conversation = create_conversation(project_dir, project_name)
     return ConversationSummary(
-        id=conversation.id,
-        project_name=conversation.project_name,
-        title=conversation.title,
+        id=int(conversation.id),
+        project_name=str(conversation.project_name),
+        title=str(conversation.title) if conversation.title else None,
         created_at=conversation.created_at.isoformat() if conversation.created_at else None,
         updated_at=conversation.updated_at.isoformat() if conversation.updated_at else None,
         message_count=0,

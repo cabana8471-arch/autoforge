@@ -15,7 +15,7 @@ from ..schemas import AgentActionResponse, AgentStartRequest, AgentStatus
 from ..services.process_manager import get_manager
 
 
-def _get_project_path(project_name: str) -> Path:
+def _get_project_path(project_name: str) -> Path | None:
     """Get project path from registry."""
     import sys
     root = Path(__file__).parent.parent.parent

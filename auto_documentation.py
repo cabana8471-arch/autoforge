@@ -161,7 +161,7 @@ class DocumentationGenerator:
 
     def _detect_tech_stack(self) -> dict:
         """Detect tech stack from project files."""
-        stack = {
+        stack: dict[str, list[str]] = {
             "frontend": [],
             "backend": [],
             "database": [],
@@ -267,9 +267,10 @@ class DocumentationGenerator:
         db_path = self.project_dir / "features.db"
         if db_path.exists():
             try:
-                from api.database import Feature, get_session
+                from api.database import Feature, create_database
 
-                session = get_session(db_path)
+                _, SessionLocal = create_database(db_path.parent)
+                session = SessionLocal()
                 db_features = session.query(Feature).order_by(Feature.priority).all()
 
                 for f in db_features:
@@ -487,7 +488,7 @@ class DocumentationGenerator:
         if docs.features:
             lines.append("## Features\n")
             # Group by category
-            categories = {}
+            categories: dict[str, list[dict]] = {}
             for f in docs.features:
                 cat = f.get("category", "General")
                 if cat not in categories:
@@ -582,7 +583,7 @@ class DocumentationGenerator:
         lines.append(f"# {docs.project_name} API Documentation\n")
 
         # Group endpoints by base path
-        grouped = {}
+        grouped: dict[str, list[APIEndpoint]] = {}
         for ep in docs.api_endpoints:
             # Handle root path "/" and paths like "/api/..."
             parts = ep.path.split("/")

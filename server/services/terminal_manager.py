@@ -241,14 +241,14 @@ class TerminalSession:
         # Type checking is disabled for these platform-specific calls.
         try:
             # Fork a new pseudo-terminal
-            pid, master_fd = pty.fork()  # type: ignore[attr-defined]
+            pid, master_fd = pty.fork()
 
             if pid == 0:
                 # Child process - exec the shell
                 os.chdir(cwd)
                 # Set terminal size (Unix-specific modules imported at top-level)
                 winsize = struct.pack("HHHH", rows, cols, 0, 0)
-                fcntl.ioctl(0, termios.TIOCSWINSZ, winsize)  # type: ignore[attr-defined]
+                fcntl.ioctl(0, termios.TIOCSWINSZ, winsize)
 
                 # Execute the shell
                 os.execvp(shell, [shell])
@@ -261,7 +261,7 @@ class TerminalSession:
 
                 # Set terminal size on master (Unix-specific modules imported at top-level)
                 winsize = struct.pack("HHHH", rows, cols, 0, 0)
-                fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)  # type: ignore[attr-defined]
+                fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
                 # Start output reading task
                 self._output_task = asyncio.create_task(self._read_output_unix())
@@ -431,7 +431,7 @@ class TerminalSession:
                 if self._master_fd is not None:
                     # Unix-specific modules imported at top-level
                     winsize = struct.pack("HHHH", rows, cols, 0, 0)
-                    fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)  # type: ignore[attr-defined]
+                    fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
 
             logger.debug(f"Terminal resized for {self.project_name}: {cols}x{rows}")
         except Exception as e:
@@ -502,7 +502,7 @@ class TerminalSession:
                 try:
                     os.kill(self._child_pid, 0)  # Check if process exists
                     # SIGKILL is Unix-specific (Windows would use SIGTERM)
-                    os.kill(self._child_pid, signal.SIGKILL)  # type: ignore[attr-defined]
+                    os.kill(self._child_pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass  # Already terminated
                 # Reap the child process to prevent zombie

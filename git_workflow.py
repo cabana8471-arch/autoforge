@@ -114,7 +114,7 @@ class GitWorkflow:
         self.main_branch = main_branch
         self.auto_merge = auto_merge
 
-    def _run_git(self, *args, check: bool = True) -> subprocess.CompletedProcess:
+    def _run_git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         """Run a git command in the project directory."""
         cmd = ["git"] + list(args)
         return subprocess.run(
@@ -507,9 +507,9 @@ def get_workflow(project_dir: Path) -> GitWorkflow:
     auto_merge = False
 
     try:
-        from server.services.autocoder_config import load_config
+        from server.services.autocoder_config import load_autocoder_config
 
-        config = load_config(project_dir)
+        config = load_autocoder_config(project_dir)
         git_config = config.get("git_workflow", {})
 
         mode = git_config.get("mode", "trunk")

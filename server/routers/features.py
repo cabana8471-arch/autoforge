@@ -31,7 +31,7 @@ _Feature = None
 logger = logging.getLogger(__name__)
 
 
-def _get_project_path(project_name: str) -> Path:
+def _get_project_path(project_name: str) -> Path | None:
     """Get project path from registry."""
     import sys
     root = Path(__file__).parent.parent.parent
