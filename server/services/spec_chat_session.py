@@ -23,7 +23,6 @@ from ..schemas import ImageAttachment
 from .chat_constants import ROOT_DIR, make_multimodal_message
 
 # Add root directory to path for imports
-ROOT_DIR = Path(__file__).parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
