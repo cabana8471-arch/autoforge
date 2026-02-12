@@ -15,6 +15,8 @@ from typing import Any, Callable
 from fastapi import APIRouter, HTTPException
 
 from ..schemas import (
+    DetachResponse,
+    DetachStatusResponse,
     ProjectCreate,
     ProjectDetail,
     ProjectPrompts,
@@ -22,6 +24,7 @@ from ..schemas import (
     ProjectSettingsUpdate,
     ProjectStats,
     ProjectSummary,
+    ReattachResponse,
 )
 
 # Lazy imports to avoid circular dependencies
@@ -31,13 +34,14 @@ _check_spec_exists: Callable[..., Any] | None = None
 _scaffold_project_prompts: Callable[..., Any] | None = None
 _get_project_prompts_dir: Callable[..., Any] | None = None
 _count_passing_tests: Callable[..., Any] | None = None
+_detach_module: Any = None
 
 
 def _init_imports():
     """Lazy import of project-level modules."""
     global _imports_initialized, _check_spec_exists
     global _scaffold_project_prompts, _get_project_prompts_dir
-    global _count_passing_tests
+    global _count_passing_tests, _detach_module
 
     if _imports_initialized:
         return
@@ -55,6 +59,10 @@ def _init_imports():
     _scaffold_project_prompts = scaffold_project_prompts
     _get_project_prompts_dir = get_project_prompts_dir
     _count_passing_tests = count_passing_tests
+
+    import detach as detach_mod
+    _detach_module = detach_mod
+
     _imports_initialized = True
 
 
@@ -140,6 +148,7 @@ async def list_projects():
             has_spec=has_spec,
             stats=stats,
             default_concurrency=info.get("default_concurrency", 3),
+            is_detached=_detach_module.is_project_detached(project_dir),
         ))
 
     return result
@@ -254,6 +263,7 @@ async def get_project(name: str):
         stats=stats,
         prompts_dir=str(prompts_dir),
         default_concurrency=get_project_concurrency(name),
+        is_detached=_detach_module.is_project_detached(project_dir),
     )
 
 
@@ -521,4 +531,105 @@ async def update_project_settings(name: str, settings: ProjectSettingsUpdate):
         stats=stats,
         prompts_dir=str(prompts_dir),
         default_concurrency=get_project_concurrency(name),
+        is_detached=_detach_module.is_project_detached(project_dir),
+    )
+
+
+@router.get("/{name}/detach-status", response_model=DetachStatusResponse)
+async def get_detach_status(name: str):
+    """Get detach status for a project."""
+    _init_imports()
+    (_, _, get_project_path, _, _, _, _) = _get_registry_functions()
+
+    name = validate_project_name(name)
+    project_dir = get_project_path(name)
+
+    if not project_dir:
+        raise HTTPException(status_code=404, detail=f"Project '{name}' not found")
+
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="Project directory not found")
+
+    status = _detach_module.get_detach_status(name)
+    return DetachStatusResponse(
+        is_detached=status["is_detached"],
+        backup_exists=status["backup_exists"],
+        backup_size=status.get("backup_size"),
+        detached_at=status.get("detached_at"),
+        file_count=status.get("file_count"),
+    )
+
+
+@router.post("/{name}/detach", response_model=DetachResponse)
+async def detach_project(name: str):
+    """Detach a project by moving Autocoder files to backup."""
+    _init_imports()
+    (_, _, get_project_path, _, _, _, _) = _get_registry_functions()
+
+    name = validate_project_name(name)
+    project_dir = get_project_path(name)
+
+    if not project_dir:
+        raise HTTPException(status_code=404, detail=f"Project '{name}' not found")
+
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="Project directory not found")
+
+    # Check if agent is running
+    from autoforge_paths import has_agent_running
+    if has_agent_running(project_dir):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot detach project while agent is running. Stop the agent first."
+        )
+
+    success, message, manifest, user_files_restored = _detach_module.detach_project(name, force=True)
+
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return DetachResponse(
+        success=True,
+        files_moved=manifest["file_count"] if manifest else 0,
+        backup_size=manifest["total_size_bytes"] if manifest else 0,
+        backup_path=".autoforge-backup",
+        message=message,
+        user_files_restored=user_files_restored,
+    )
+
+
+@router.post("/{name}/reattach", response_model=ReattachResponse)
+async def reattach_project(name: str):
+    """Reattach a project by restoring Autocoder files from backup."""
+    _init_imports()
+    (_, _, get_project_path, _, _, _, _) = _get_registry_functions()
+
+    name = validate_project_name(name)
+    project_dir = get_project_path(name)
+
+    if not project_dir:
+        raise HTTPException(status_code=404, detail=f"Project '{name}' not found")
+
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="Project directory not found")
+
+    # Check if agent is running
+    from autoforge_paths import has_agent_running
+    if has_agent_running(project_dir):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reattach project while agent is running. Stop the agent first."
+        )
+
+    success, message, files_restored, conflicts = _detach_module.reattach_project(name)
+
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return ReattachResponse(
+        success=True,
+        files_restored=files_restored,
+        message=message,
+        conflicts=conflicts,
+        conflicts_backup_path=".autoforge-pre-reattach-backup" if conflicts else None,
     )

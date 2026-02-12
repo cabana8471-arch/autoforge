@@ -137,7 +137,7 @@ DANGEROUS_COMMANDS = {
     "az",
     # Container and orchestration
     "kubectl",
-    "docker-compose",
+    # Note: docker-compose removed - commonly needed for local dev environments
 }
 
 
@@ -226,6 +226,7 @@ def extract_commands(command_string: str) -> list[str]:
     commands = []
 
     # shlex doesn't treat ; as a separator, so we need to pre-process
+    # (re is already imported at module level)
 
     # Split on semicolons that aren't inside quotes (simple heuristic)
     # This handles common cases like "echo hello; ls"

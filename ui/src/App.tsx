@@ -78,21 +78,23 @@ function App() {
 
   const queryClient = useQueryClient()
   const { data: projects, isLoading: projectsLoading } = useProjects()
-  const { data: features } = useFeatures(selectedProject)
+
+  // Get selected project data
+  const selectedProjectData = projects?.find(p => p.name === selectedProject)
+  const hasSpec = selectedProjectData?.has_spec ?? true
+  const isDetached = projectsLoading ? true : (selectedProjectData?.is_detached ?? false)
+
+  const { data: features } = useFeatures(selectedProject, isDetached)
   const { data: settings } = useSettings()
   useAgentStatus(selectedProject) // Keep polling for status updates
   const wsState = useProjectWebSocket(selectedProject)
   const { theme, setTheme, darkMode, toggleDarkMode, themes } = useTheme()
 
-  // Get has_spec from the selected project
-  const selectedProjectData = projects?.find(p => p.name === selectedProject)
-  const hasSpec = selectedProjectData?.has_spec ?? true
-
   // Fetch graph data when in graph view
   const { data: graphData } = useQuery({
     queryKey: ['dependencyGraph', selectedProject],
     queryFn: () => getDependencyGraph(selectedProject!),
-    enabled: !!selectedProject && viewMode === 'graph',
+    enabled: !!selectedProject && viewMode === 'graph' && !isDetached,
     refetchInterval: 5000, // Refresh every 5 seconds
   })
 
@@ -350,6 +352,7 @@ function App() {
                   projectName={selectedProject}
                   status={wsState.agentStatus}
                   defaultConcurrency={selectedProjectData?.default_concurrency}
+                  isDetached={isDetached}
                 />
 
                 <DevServerControl

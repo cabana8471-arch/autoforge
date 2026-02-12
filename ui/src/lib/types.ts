@@ -16,10 +16,36 @@ export interface ProjectSummary {
   has_spec: boolean
   stats: ProjectStats
   default_concurrency: number
+  is_detached: boolean
 }
 
 export interface ProjectDetail extends ProjectSummary {
   prompts_dir: string
+}
+
+export interface DetachResponse {
+  success: boolean
+  files_moved: number
+  backup_size: number
+  backup_path: string
+  message: string
+  user_files_restored: number
+}
+
+export interface ReattachResponse {
+  success: boolean
+  files_restored: number
+  message: string
+  conflicts: string[]
+  conflicts_backup_path: string | null
+}
+
+export interface DetachStatusResponse {
+  is_detached: boolean
+  backup_exists: boolean
+  backup_size: number | null
+  detached_at: string | null
+  file_count: number | null
 }
 
 // Filesystem types
