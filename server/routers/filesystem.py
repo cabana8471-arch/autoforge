@@ -160,7 +160,7 @@ def is_hidden_file(path: Path) -> bool:
     if sys.platform == "win32":
         try:
             import ctypes
-            attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+            attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))  # type: ignore[attr-defined]
             if attrs != -1 and (attrs & 0x02):  # FILE_ATTRIBUTE_HIDDEN
                 return True
         except Exception:
@@ -324,7 +324,8 @@ def get_windows_drives() -> list[DriveInfo]:
         import string
 
         # Get bitmask of available drives
-        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        # mypy doesn't know about windll on non-Windows platforms
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()  # type: ignore[attr-defined]
 
         for i, letter in enumerate(string.ascii_uppercase):
             if bitmask & (1 << i):
@@ -332,7 +333,7 @@ def get_windows_drives() -> list[DriveInfo]:
                 try:
                     # Try to get volume label
                     volume_name = ctypes.create_unicode_buffer(1024)
-                    ctypes.windll.kernel32.GetVolumeInformationW(
+                    ctypes.windll.kernel32.GetVolumeInformationW(  # type: ignore[attr-defined]
                         drive_path,
                         volume_name,
                         1024,

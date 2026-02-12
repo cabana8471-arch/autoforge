@@ -29,6 +29,7 @@ from sqlalchemy import (
     event,
     text,
 )
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 from sqlalchemy.types import JSON
 
@@ -370,15 +371,21 @@ def _configure_sqlite_immediate_transactions(engine) -> None:
     - Acquires write lock immediately, preventing stale reads
     - Works correctly regardless of prior ORM operations
     - Future-proof: won't break when pysqlite legacy mode is removed in Python 3.16
+
+    Note: We only use IMMEDIATE for user transactions, not for PRAGMA statements.
+    The do_begin hook only fires when SQLAlchemy starts a transaction, which
+    doesn't happen for PRAGMA commands when using conn.exec_driver_sql() directly.
     """
     @event.listens_for(engine, "connect")
     def do_connect(dbapi_connection, connection_record):
         # Disable pysqlite's implicit transaction handling
         dbapi_connection.isolation_level = None
 
-        # Set busy_timeout on raw connection before any transactions
+        # Execute PRAGMAs immediately on raw connection before any transactions
+        # This is safe because isolation_level=None means no implicit transactions
         cursor = dbapi_connection.cursor()
         try:
+            # Set busy_timeout on raw connection before any transactions
             cursor.execute("PRAGMA busy_timeout=30000")
         finally:
             cursor.close()
@@ -393,9 +400,6 @@ def create_database(project_dir: Path) -> tuple:
     """
     Create database and return engine + session maker.
 
-    Uses a cache to avoid creating new engines for each request, which improves
-    performance by reusing database connections.
-
     Args:
         project_dir: Directory containing the project
 
@@ -404,8 +408,11 @@ def create_database(project_dir: Path) -> tuple:
     """
     cache_key = project_dir.as_posix()
 
+    # Return cached engine if available
     if cache_key in _engine_cache:
-        return _engine_cache[cache_key]
+        engine = _engine_cache[cache_key]
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        return engine, SessionLocal
 
     db_url = get_database_url(project_dir)
 
@@ -454,12 +461,18 @@ def create_database(project_dir: Path) -> tuple:
     # Migrate to add schedules tables
     _migrate_add_schedules_tables(engine)
 
+    # Cache the engine for dispose_engine functionality
+    _engine_cache[cache_key] = engine
+
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    # Cache the engine and session maker
-    _engine_cache[cache_key] = (engine, SessionLocal)
-
     return engine, SessionLocal
+
+
+# Global session maker - will be set when server starts
+_session_maker: Optional[sessionmaker] = None
+
+# Engine cache for dispose functionality
+_engine_cache: dict[str, Engine] = {}
 
 
 def dispose_engine(project_dir: Path) -> bool:
@@ -474,19 +487,11 @@ def dispose_engine(project_dir: Path) -> bool:
     cache_key = project_dir.as_posix()
 
     if cache_key in _engine_cache:
-        engine, _ = _engine_cache.pop(cache_key)
+        engine = _engine_cache.pop(cache_key)
         engine.dispose()
         return True
 
     return False
-
-
-# Global session maker - will be set when server starts
-_session_maker: Optional[sessionmaker] = None
-
-# Engine cache to avoid creating new engines for each request
-# Key: project directory path (as posix string), Value: (engine, SessionLocal)
-_engine_cache: dict[str, tuple] = {}
 
 
 def set_session_maker(session_maker: sessionmaker) -> None:
@@ -527,15 +532,23 @@ from contextlib import contextmanager
 
 
 @contextmanager
-def atomic_transaction(session_maker):
+def atomic_transaction(session_maker, isolation_level: str = "IMMEDIATE"):
     """Context manager for atomic SQLite transactions.
 
-    Acquires a write lock immediately via BEGIN IMMEDIATE (configured by
-    engine event hooks), preventing stale reads in read-modify-write patterns.
-    This is essential for preventing race conditions in parallel mode.
+    Acquires a write lock immediately via BEGIN IMMEDIATE, preventing
+    stale reads in read-modify-write patterns. This is essential for
+    preventing race conditions in parallel mode.
+
+    Note: The engine is configured via _configure_sqlite_immediate_transactions()
+    to use BEGIN IMMEDIATE for all transactions. The isolation_level parameter
+    is kept for backwards compatibility and for EXCLUSIVE transactions when
+    blocking readers is required.
 
     Args:
         session_maker: SQLAlchemy sessionmaker
+        isolation_level: "IMMEDIATE" (default) or "EXCLUSIVE"
+            - IMMEDIATE: Acquires write lock at transaction start (default via event hooks)
+            - EXCLUSIVE: Also blocks other readers (requires explicit BEGIN EXCLUSIVE)
 
     Yields:
         SQLAlchemy session with automatic commit/rollback
@@ -549,6 +562,12 @@ def atomic_transaction(session_maker):
     """
     session = session_maker()
     try:
+        # For EXCLUSIVE mode, override the default IMMEDIATE from event hooks
+        # For IMMEDIATE mode, the event hooks handle BEGIN IMMEDIATE automatically
+        if isolation_level == "EXCLUSIVE":
+            session.execute(text("BEGIN EXCLUSIVE"))
+        # Note: For IMMEDIATE, we don't issue BEGIN here - the event hook handles it
+        # This prevents the fragile "BEGIN on already-begun transaction" issue
         yield session
         session.commit()
     except Exception:
@@ -559,3 +578,13 @@ def atomic_transaction(session_maker):
         raise
     finally:
         session.close()
+
+
+# Note: The following functions were removed as dead code (never imported/called):
+# - atomic_claim_feature()
+# - atomic_mark_passing()
+# - atomic_update_priority_to_end()
+# - atomic_get_next_priority()
+#
+# The MCP server reimplements this logic inline with proper atomic UPDATE WHERE
+# clauses. See mcp_server/feature_mcp.py for the actual implementation.
