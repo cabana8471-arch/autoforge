@@ -19,11 +19,24 @@ PROGRESS_CACHE_FILE = ".progress_cache"
 
 # SQLite connection settings for parallel mode safety
 SQLITE_TIMEOUT = 30  # seconds to wait for locks
+SQLITE_BUSY_TIMEOUT_MS = 30000  # milliseconds for PRAGMA busy_timeout
 
 
 def _get_connection(db_file: Path) -> sqlite3.Connection:
-    """Get a SQLite connection with proper timeout settings for parallel mode."""
-    return sqlite3.connect(db_file, timeout=SQLITE_TIMEOUT)
+    """Get a SQLite connection with proper timeout settings.
+
+    Uses timeout=30s and PRAGMA busy_timeout=30000 for safe operation
+    in parallel mode where multiple processes access the same database.
+
+    Args:
+        db_file: Path to the SQLite database file
+
+    Returns:
+        sqlite3.Connection with proper timeout settings
+    """
+    conn = sqlite3.connect(db_file, timeout=SQLITE_TIMEOUT)
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+    return conn
 
 
 def has_features(project_dir: Path) -> bool:
@@ -65,6 +78,8 @@ def has_features(project_dir: Path) -> bool:
 def count_passing_tests(project_dir: Path) -> tuple[int, int, int, int]:
     """
     Count passing, in_progress, total, and needs_human_input tests via direct database access.
+
+    Uses connection with proper timeout settings for parallel mode safety.
 
     Args:
         project_dir: Directory containing the project
@@ -132,6 +147,8 @@ def count_passing_tests(project_dir: Path) -> tuple[int, int, int, int]:
 def get_all_passing_features(project_dir: Path) -> list[dict]:
     """
     Get all passing features for webhook notifications.
+
+    Uses connection with proper timeout settings for parallel mode safety.
 
     Args:
         project_dir: Directory containing the project
@@ -237,6 +254,47 @@ def send_progress_webhook(passing: int, total: int, project_dir: Path) -> None:
             cache_file.write_text(
                 json.dumps({"count": passing, "passing_ids": current_passing_ids})
             )
+
+
+def clear_stuck_features(project_dir: Path) -> int:
+    """
+    Clear all in_progress flags from features at agent startup.
+
+    When an agent is stopped mid-work (e.g., user interrupt, crash),
+    features can be left with in_progress=True and become orphaned.
+    This function clears those flags so features return to the pending queue.
+
+    Args:
+        project_dir: Directory containing the project
+
+    Returns:
+        Number of features that were unstuck
+    """
+    db_file = project_dir / "features.db"
+    if not db_file.exists():
+        return 0
+
+    try:
+        with closing(_get_connection(db_file)) as conn:
+            cursor = conn.cursor()
+
+            # Count how many will be cleared
+            cursor.execute("SELECT COUNT(*) FROM features WHERE in_progress = 1")
+            count = cursor.fetchone()[0]
+
+            if count > 0:
+                # Clear all in_progress flags
+                cursor.execute("UPDATE features SET in_progress = 0 WHERE in_progress = 1")
+                conn.commit()
+                print(f"[Auto-recovery] Cleared {count} stuck feature(s) from previous session")
+
+            return int(count)
+    except sqlite3.OperationalError:
+        # Table doesn't exist or doesn't have in_progress column
+        return 0
+    except Exception as e:
+        print(f"[Warning] Could not clear stuck features: {e}")
+        return 0
 
 
 def print_session_header(session_num: int, is_initializer: bool) -> None:

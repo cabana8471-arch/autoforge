@@ -21,9 +21,10 @@ interface AgentControlProps {
   projectName: string
   status: AgentStatus
   defaultConcurrency?: number
+  isDetached?: boolean
 }
 
-export function AgentControl({ projectName, status, defaultConcurrency = 3 }: AgentControlProps) {
+export function AgentControl({ projectName, status, defaultConcurrency = 3, isDetached = false }: AgentControlProps) {
   const { data: settings } = useSettings()
   const yoloMode = settings?.yolo_mode ?? false
 
@@ -66,10 +67,10 @@ export function AgentControl({ projectName, status, defaultConcurrency = 3 }: Ag
   const stopAgent = useStopAgent(projectName)
   const gracefulPause = useGracefulPauseAgent(projectName)
   const gracefulResume = useGracefulResumeAgent(projectName)
-  const { data: nextRun } = useNextScheduledRun(projectName)
   const { data: project } = useProject(projectName)
   const autoImproveEnabled = Boolean(project?.auto_improve_enabled)
   const autoImproveInterval = project?.auto_improve_interval_minutes ?? 10
+  const { data: nextRun } = useNextScheduledRun(projectName, isDetached)
 
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [showAutoImproveModal, setShowAutoImproveModal] = useState(false)
@@ -251,6 +252,7 @@ export function AgentControl({ projectName, status, defaultConcurrency = 3 }: Ag
         projectName={projectName}
         isOpen={showScheduleModal}
         onClose={() => setShowScheduleModal(false)}
+        isDetached={isDetached}
       />
 
       {/* Auto-Improve Modal */}

@@ -18,6 +18,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 
 logger = logging.getLogger(__name__)
 
+
 class Base(DeclarativeBase):
     """SQLAlchemy 2.0 style declarative base."""
     pass

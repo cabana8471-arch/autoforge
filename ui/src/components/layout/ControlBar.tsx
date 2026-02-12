@@ -15,6 +15,7 @@ export function ControlBar() {
   const {
     selectedProject,
     selectedProjectData,
+    isDetached,
     wsState,
     settings,
     setShowResetModal,
@@ -26,6 +27,7 @@ export function ControlBar() {
         projectName={selectedProject!}
         status={wsState.agentStatus}
         defaultConcurrency={selectedProjectData?.default_concurrency}
+        isDetached={isDetached}
       />
 
       <DevServerControl

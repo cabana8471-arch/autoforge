@@ -48,6 +48,7 @@ class ProjectSummary(BaseModel):
     default_concurrency: int = 3
     auto_improve_enabled: bool = False
     auto_improve_interval_minutes: int = 10
+    is_detached: bool = False  # True if Autocoder files moved to backup
 
 
 class ProjectDetail(BaseModel):
@@ -60,6 +61,7 @@ class ProjectDetail(BaseModel):
     default_concurrency: int = 3
     auto_improve_enabled: bool = False
     auto_improve_interval_minutes: int = 10
+    is_detached: bool = False  # True if Autocoder files moved to backup
 
 
 class ProjectPrompts(BaseModel):
@@ -67,6 +69,38 @@ class ProjectPrompts(BaseModel):
     app_spec: str = ""
     initializer_prompt: str = ""
     coding_prompt: str = ""
+
+
+# ============================================================================
+# Detach/Reattach Schemas
+# ============================================================================
+
+class DetachResponse(BaseModel):
+    """Response schema for detach operation."""
+    success: bool
+    files_moved: int
+    backup_size: int
+    backup_path: str  # Relative path to backup directory (not absolute for security)
+    message: str = ""
+    user_files_restored: int = 0  # User files restored from pre-reattach backup
+
+
+class ReattachResponse(BaseModel):
+    """Response schema for reattach operation."""
+    success: bool
+    files_restored: int
+    message: str = ""
+    conflicts: list[str] = []  # List of user files that were backed up
+    conflicts_backup_path: str | None = None  # Path to backup dir if conflicts exist
+
+
+class DetachStatusResponse(BaseModel):
+    """Response schema for detach status check."""
+    is_detached: bool
+    backup_exists: bool
+    backup_size: int | None = None
+    detached_at: str | None = None
+    file_count: int | None = None
 
 
 class ProjectPromptsUpdate(BaseModel):

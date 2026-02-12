@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as api from '../lib/api'
-import type { DevServerConfig, FeatureCreate, FeatureUpdate, ModelsResponse, ProjectSettingsUpdate, ProvidersResponse, Settings, SettingsUpdate } from '../lib/types'
+import type { DevServerConfig, FeatureCreate, FeatureUpdate, ModelsResponse, ProjectSettingsUpdate, ProjectSummary, ProvidersResponse, Settings, SettingsUpdate } from '../lib/types'
 
 // ============================================================================
 // Projects
@@ -62,6 +62,46 @@ export function useResetProject(projectName: string) {
   })
 }
 
+export function useDetachProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => api.detachProject(name),
+    onSuccess: (_data, name) => {
+      queryClient.setQueryData(['projects'], (oldData: ProjectSummary[] | undefined) => {
+        if (!oldData) return oldData
+        return oldData.map(p => p.name === name ? { ...p, is_detached: true } : p)
+      })
+      queryClient.setQueryData(['features', name], null)
+      queryClient.setQueryData(['dependencyGraph', name], null)
+      queryClient.setQueryData(['schedules', name], null)
+      queryClient.setQueryData(['nextRun', name], null)
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project', name] })
+      queryClient.invalidateQueries({ queryKey: ['features', name] })
+      queryClient.invalidateQueries({ queryKey: ['schedules', name] })
+      queryClient.invalidateQueries({ queryKey: ['nextRun', name] })
+    },
+  })
+}
+
+export function useReattachProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => api.reattachProject(name),
+    onSuccess: (_data, name) => {
+      queryClient.setQueryData(['projects'], (oldData: ProjectSummary[] | undefined) => {
+        if (!oldData) return oldData
+        return oldData.map(p => p.name === name ? { ...p, is_detached: false } : p)
+      })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project', name] })
+      queryClient.invalidateQueries({ queryKey: ['features', name] })
+      queryClient.invalidateQueries({ queryKey: ['schedules', name] })
+      queryClient.invalidateQueries({ queryKey: ['nextRun', name] })
+    },
+  })
+}
+
 export function useUpdateProjectSettings(projectName: string) {
   const queryClient = useQueryClient()
 
@@ -79,12 +119,12 @@ export function useUpdateProjectSettings(projectName: string) {
 // Features
 // ============================================================================
 
-export function useFeatures(projectName: string | null) {
+export function useFeatures(projectName: string | null, isDetached: boolean = false) {
   return useQuery({
     queryKey: ['features', projectName],
     queryFn: () => api.listFeatures(projectName!),
-    enabled: !!projectName,
-    refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
+    enabled: !!projectName && !isDetached,
+    refetchInterval: isDetached ? false : 5000,
   })
 }
 

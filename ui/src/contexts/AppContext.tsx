@@ -114,6 +114,7 @@ interface AppContextValue {
   // -- Derived state --
   selectedProjectData: ProjectSummary | undefined
   hasSpec: boolean
+  isDetached: boolean
   progress: Progress
 
   // -- Graph --
@@ -228,16 +229,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ---- Queries ----
   const queryClient = useQueryClient()
   const { data: projects, isLoading: projectsLoading } = useProjects()
-  const { data: features } = useFeatures(selectedProject)
+  const selectedProjectData = projects?.find(p => p.name === selectedProject)
+  const hasSpec = selectedProjectData?.has_spec ?? true
+  // Treat the project as detached while projects load, so detached projects never fire feature queries
+  const isDetached = projectsLoading ? true : (selectedProjectData?.is_detached ?? false)
+  const { data: features } = useFeatures(selectedProject, isDetached)
   const { data: settings } = useSettings()
   useAgentStatus(selectedProject) // keep polling for status updates
   const wsState = useProjectWebSocket(selectedProject)
   const { theme, setTheme, darkMode, toggleDarkMode, themes, currentTheme } = useTheme()
 
   // ---- Derived state ----
-  const selectedProjectData = projects?.find(p => p.name === selectedProject)
-  const hasSpec = selectedProjectData?.has_spec ?? true
-
   const progress = useMemo<Progress>(() => {
     // Prefer WebSocket progress when available; fall back to feature counts
     if (wsState.progress.total > 0) {
@@ -263,7 +265,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { data: graphData } = useQuery({
     queryKey: ['dependencyGraph', selectedProject],
     queryFn: () => getDependencyGraph(selectedProject!),
-    enabled: !!selectedProject && activeView === 'graph',
+    enabled: !!selectedProject && activeView === 'graph' && !isDetached,
     refetchInterval: 5000,
   })
 
@@ -506,6 +508,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Derived
       selectedProjectData,
       hasSpec,
+      isDetached,
       progress,
 
       // Graph
@@ -546,6 +549,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       queryClient,
       selectedProjectData,
       hasSpec,
+      isDetached,
       progress,
       graphData,
       handleGraphNodeClick,

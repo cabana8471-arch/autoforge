@@ -33,9 +33,15 @@ import type {
   ScheduleUpdate,
   ScheduleListResponse,
   NextRunResponse,
+  DetachResponse,
+  ReattachResponse,
+  DetachStatusResponse,
 } from './types'
 
 const API_BASE = '/api'
+
+// Export for hooks that make direct fetch calls with full paths
+export const API_BASE_URL = ''
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {
@@ -127,6 +133,19 @@ export async function resetProject(
   return fetchJSON(`/projects/${encodeURIComponent(name)}/reset${params}`, {
     method: 'POST',
   })
+}
+
+// Detach/Reattach API
+export async function detachProject(name: string): Promise<DetachResponse> {
+  return fetchJSON(`/projects/${encodeURIComponent(name)}/detach`, { method: 'POST' })
+}
+
+export async function reattachProject(name: string): Promise<ReattachResponse> {
+  return fetchJSON(`/projects/${encodeURIComponent(name)}/reattach`, { method: 'POST' })
+}
+
+export async function getDetachStatus(name: string): Promise<DetachStatusResponse> {
+  return fetchJSON(`/projects/${encodeURIComponent(name)}/detach-status`)
 }
 
 // ============================================================================
