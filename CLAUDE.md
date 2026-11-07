@@ -440,10 +440,7 @@ Alternative providers are configured via the **Settings UI** (gear icon > API Pr
 - `/checkpoint` - Create comprehensive checkpoint commit
 - `/review-pr` - Review pull requests
 
-**Custom agents** (`.claude/agents/`):
-- `coder.md` - Elite software architect agent for code implementation (Opus)
-- `code-review.md` - Code review agent for quality/security/performance analysis (Opus)
-- `deep-dive.md` - Technical investigator for deep analysis and debugging (Opus)
+**Custom agents**: this fork ships no project-level agents (`.claude/agents/` was removed so the user's global agents apply).
 
 **Skills** (`.claude/skills/`):
 - `frontend-design` - Distinctive, production-grade UI design
