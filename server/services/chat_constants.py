@@ -11,6 +11,7 @@ imports (``from .chat_constants import API_ENV_VARS``) continue to work.
 
 import logging
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
@@ -94,6 +95,65 @@ def format_client_init_error(exc: Exception) -> str:
             )
         return msg
     return f"Failed to initialize Claude: {exc}"
+
+
+def write_system_prompt_file(project_dir: Path, session_kind: str, system_prompt: str) -> Path:
+    """Write a chat session's system prompt to an ephemeral file in ``.autoforge/``.
+
+    The Claude Agent SDK passes inline system prompts as a CLI argument, which
+    breaks on Windows ("The command line is too long.") once the prompt plus
+    the other arguments exceed ~8191 characters.  Pass the returned path as
+    ``system_prompt={"type": "file", "path": str(path)}`` so the CLI reads it
+    via ``--system-prompt-file`` instead.  Callers should delete the file with
+    ``remove_system_prompt_file()`` when the session closes.
+
+    Any CLAUDE.md that older versions generated from a chat prompt is removed
+    first (see ``remove_legacy_claude_md()``).
+    """
+    from autoforge_paths import get_system_prompt_path
+
+    remove_legacy_claude_md(project_dir)
+    path = get_system_prompt_path(project_dir, session_kind, uuid.uuid4().hex).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(system_prompt, encoding="utf-8")
+    return path
+
+
+# Opening lines of system prompts that older AutoForge versions wrote into the
+# project's root CLAUDE.md.  Used to recognise and remove those stale files.
+_LEGACY_CLAUDE_MD_PREFIXES = (
+    "You are a helpful project assistant and backlog manager for the",
+    "---\ndescription: Create an app spec for autonomous coding",
+)
+
+
+def remove_legacy_claude_md(project_dir: Path) -> None:
+    """Delete a root CLAUDE.md that an older AutoForge chat session generated.
+
+    Only files that still start with one of the known generated prompts are
+    removed; a user-authored CLAUDE.md is never touched.
+    """
+    claude_md = project_dir / "CLAUDE.md"
+    try:
+        head = claude_md.read_text(encoding="utf-8", errors="replace")[:200].replace("\r\n", "\n")
+    except OSError:
+        return
+    if head.startswith(_LEGACY_CLAUDE_MD_PREFIXES):
+        try:
+            claude_md.unlink()
+            logger.info(f"Removed AutoForge-generated chat prompt from {claude_md}")
+        except OSError as e:
+            logger.warning(f"Failed to remove legacy {claude_md}: {e}")
+
+
+def remove_system_prompt_file(path: Path | None, log: logging.Logger) -> None:
+    """Delete a system prompt file created by ``write_system_prompt_file()``."""
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except Exception as e:
+        log.warning(f"Error removing system prompt file {path}: {e}")
 
 
 async def safe_receive_response(client: Any, log: logging.Logger) -> AsyncGenerator:
