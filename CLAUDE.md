@@ -125,6 +125,7 @@ python -m pytest test_regression_selection.py # Regression test selection tests 
 python -m pytest test_file_state_guard.py     # Stale-read Write/Edit loop guard (8 tests)
 python -m pytest test_database_journal.py     # SQLite journal mode / WAL fallback tests
 python -m pytest test_expand_chat_session.py  # Expand chat: created-feature events, tool permissions
+python -m pytest test_subprocess_encoding.py  # Subprocess UTF-8 encoding tests
 ```
 
 ### React UI
