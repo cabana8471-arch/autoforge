@@ -34,6 +34,18 @@ test.describe('New Project dialog', () => {
     await expect(page.getByRole('dialog', { name: 'New Project' })).toBeVisible()
   })
 
+  test('project name pattern rejects invalid names', async ({ page }) => {
+    // The pattern must be valid under the browser's /v regex flag, or it is ignored
+    await page.getByRole('dialog').getByText('Create New Project').click()
+    const nameInput = page.getByRole('dialog', { name: 'Create New Project' }).getByLabel('Project Name')
+
+    await nameInput.fill('bad name!')
+    expect(await nameInput.evaluate((el: HTMLInputElement) => el.validity.patternMismatch)).toBe(true)
+
+    await nameInput.fill('good-name_1')
+    expect(await nameInput.evaluate((el: HTMLInputElement) => el.validity.patternMismatch)).toBe(false)
+  })
+
   test('import path opens the folder picker', async ({ page }) => {
     await page.getByRole('dialog').getByText('Import Existing Project').click()
 

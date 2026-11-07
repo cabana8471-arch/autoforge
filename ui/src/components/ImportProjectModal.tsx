@@ -537,7 +537,7 @@ export function ImportProjectModal({
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
               placeholder="my-project"
-              pattern="^[a-zA-Z0-9_-]+$"
+              pattern="^[a-zA-Z0-9_\-]+$"
               autoFocus
             />
             <p className="text-sm text-muted-foreground">
