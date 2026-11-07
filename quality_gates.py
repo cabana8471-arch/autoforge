@@ -1,434 +1,385 @@
 """
-Quality Gates Module
-====================
+Quality Gates
+=============
 
-Provides quality checking functionality for the Autocoder system.
-Runs lint, type-check, and custom scripts before allowing features
-to be marked as passing.
+Auto-detects a project's linters and type checkers, runs them, and reports
+structured results. Used by the feature MCP server to verify code before a
+feature is marked as passing.
 
-Supports:
-- ESLint/Biome for JavaScript/TypeScript
-- ruff/flake8 for Python
-- Custom scripts via .autocoder/quality-checks.sh
+Quality gates are disabled by default. They are configured ONLY through
+environment variables of the AutoForge process (e.g. ``~/.autoforge/.env``),
+never through files inside the project, because the coding agent can write
+anything in the project directory and must not be able to turn the gates on
+(or weaken them)::
+
+    AUTOFORGE_QUALITY_GATES=strict        # off (default) | strict (or 1/true/on) | warn
+    AUTOFORGE_QUALITY_GATES_TIMEOUT=120   # per-check timeout in seconds (max 600)
+    AUTOFORGE_QUALITY_GATES_CHECKS=lint,type_check
+
+In ``strict`` mode ``feature_mark_passing`` refuses to mark a feature as
+passing while any check fails. In ``warn`` mode the checks still run and are
+recorded, but failures are reported as warnings only.
+
+SECURITY / TRUST: the checks run inside the feature MCP server process, which
+is NOT covered by the agent's Bash sandbox or the command allowlist in
+``security.py``. They execute project-local tooling and configuration that the
+agent can modify (``node_modules/.bin/*``, ``.venv``/``venv``,
+``eslint.config.js`` and similar). Enabling quality gates is therefore a trust
+decision: only enable them for projects whose contents you trust to run
+unsandboxed on your machine.
+
+Detected tools (only run when the project is configured for them):
+
+- Lint: ESLint, Biome, ruff, flake8
+- Type check: TypeScript (``tsc --noEmit``, or ``tsc --build --noEmit`` for
+  project references), mypy
+
+Node tools are only run from the project's ``node_modules/.bin`` and Python
+tools only when installed, so a check never triggers a package download.
 """
+
+from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import time
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any
+
+DEFAULT_TIMEOUT_SECONDS = 120
+MAX_TIMEOUT_SECONDS = 600
+# Keep stored output small - it lands in the features database and in MCP responses
+MAX_OUTPUT_CHARS = 4000
+
+ESLINT_CONFIGS = (
+    "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs",
+    "eslint.config.ts", "eslint.config.mts", "eslint.config.cts",
+    ".eslintrc", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json",
+    ".eslintrc.yml", ".eslintrc.yaml",
+)
+BIOME_CONFIGS = ("biome.json", "biome.jsonc")
+FLAKE8_CONFIGS = (".flake8",)
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
-class QualityCheckResult(TypedDict):
-    """Result of a single quality check."""
+@dataclass
+class QualityGateConfig:
+    """Effective quality-gate settings for a project."""
+
+    enabled: bool = False
+    strict_mode: bool = True
+    lint: bool = True
+    type_check: bool = True
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+
+
+@dataclass
+class QualityCheck:
+    """A single check to run: a name, a category and the command line."""
+
     name: str
+    category: str  # "lint" or "type_check"
+    command: list[str]
+
+
+@dataclass
+class CheckResult:
+    """Outcome of running one quality check."""
+
+    name: str
+    category: str
+    command: str
     passed: bool
+    exit_code: int | None
+    duration_seconds: float
     output: str
-    duration_ms: int
+    timed_out: bool = False
 
 
-class QualityGateResult(TypedDict):
-    """Result of all quality checks combined."""
+@dataclass
+class QualityReport:
+    """Aggregate result of all quality checks for a project."""
+
     passed: bool
-    timestamp: str
-    checks: dict[str, QualityCheckResult]
-    summary: str
+    checks: list[CheckResult] = field(default_factory=list)
+    strict_mode: bool = True
+    timestamp: str = ""
+    message: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
-def _run_command(cmd: list[str], cwd: Path, timeout: int = 60) -> tuple[int, str, int]:
+ENV_ENABLED = "AUTOFORGE_QUALITY_GATES"
+ENV_TIMEOUT = "AUTOFORGE_QUALITY_GATES_TIMEOUT"
+ENV_CHECKS = "AUTOFORGE_QUALITY_GATES_CHECKS"
+
+# Environment variables forwarded to the feature MCP server (see client.py)
+QUALITY_GATE_ENV_VARS = (ENV_ENABLED, ENV_TIMEOUT, ENV_CHECKS)
+
+_STRICT_VALUES = {"1", "true", "yes", "on", "strict"}
+_WARN_VALUES = {"warn", "warning"}
+
+
+def load_config(env: dict[str, str] | None = None) -> QualityGateConfig:
+    """Load quality gate settings from environment variables.
+
+    Deliberately ignores any file in the project directory: the agent can
+    write there, and enabling the gates runs project tooling unsandboxed.
+    Unknown or malformed values fall back to safe defaults (disabled).
     """
-    Run a command and return (exit_code, output, duration_ms).
+    if env is None:
+        env = dict(os.environ)
+    config = QualityGateConfig()
 
-    Args:
-        cmd: Command and arguments as a list
-        cwd: Working directory
-        timeout: Timeout in seconds
+    mode = env.get(ENV_ENABLED, "").strip().lower()
+    if mode in _STRICT_VALUES:
+        config.enabled = True
+        config.strict_mode = True
+    elif mode in _WARN_VALUES:
+        config.enabled = True
+        config.strict_mode = False
+    elif mode not in ("", "0", "false", "no", "off"):
+        print(f"[quality_gates] Ignoring unknown {ENV_ENABLED}={mode!r}; gates disabled", file=sys.stderr)
 
-    Returns:
-        (exit_code, combined_output, duration_ms)
+    timeout = env.get(ENV_TIMEOUT, "").strip()
+    if timeout:
+        try:
+            value = int(timeout)
+        except ValueError:
+            value = 0
+        if value > 0:
+            config.timeout_seconds = min(value, MAX_TIMEOUT_SECONDS)
+
+    checks = env.get(ENV_CHECKS)
+    if checks is not None and checks.strip():
+        names = {c.strip().lower().replace("-", "_") for c in checks.split(",")}
+        config.lint = "lint" in names
+        config.type_check = "type_check" in names
+
+    return config
+
+
+def _node_bin(project_dir: Path, name: str) -> str | None:
+    """Return the project-local Node binary, or None if not installed."""
+    bin_dir = project_dir / "node_modules" / ".bin"
+    candidates = [f"{name}.cmd", name] if sys.platform == "win32" else [name]
+    for candidate in candidates:
+        path = bin_dir / candidate
+        if path.is_file():
+            return str(path)
+    return None
+
+
+def _python_tool(project_dir: Path, name: str) -> list[str] | None:
+    """Return a command prefix for a Python tool, or None if unavailable.
+
+    Prefers the project's own virtualenv so the tool sees the project's
+    dependencies, then falls back to PATH.
     """
-    start = time.time()
+    scripts = "Scripts" if sys.platform == "win32" else "bin"
+    exe = f"{name}.exe" if sys.platform == "win32" else name
+    for venv in (".venv", "venv"):
+        path = project_dir / venv / scripts / exe
+        if path.is_file():
+            return [str(path)]
+    found = shutil.which(name)
+    if found:
+        return [found]
+    return None
 
+
+def _read_text(path: Path) -> str:
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _package_json(project_dir: Path) -> dict[str, Any]:
+    text = _read_text(project_dir / "package.json")
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _has_python_sources(project_dir: Path) -> bool:
+    markers = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
+    return any((project_dir / m).is_file() for m in markers)
+
+
+def detect_checks(project_dir: Path, config: QualityGateConfig | None = None) -> list[QualityCheck]:
+    """Detect which linters and type checkers apply to a project."""
+    # Absolute paths: the commands run with cwd=project_dir
+    project_dir = project_dir.resolve()
+    if config is None:
+        config = load_config()
+
+    checks: list[QualityCheck] = []
+    pkg = _package_json(project_dir)
+    pyproject = _read_text(project_dir / "pyproject.toml")
+    setup_cfg = _read_text(project_dir / "setup.cfg")
+    tox_ini = _read_text(project_dir / "tox.ini")
+    is_python = _has_python_sources(project_dir)
+
+    if config.lint:
+        has_eslint_config = (
+            any((project_dir / c).is_file() for c in ESLINT_CONFIGS) or "eslintConfig" in pkg
+        )
+        eslint = _node_bin(project_dir, "eslint")
+        if has_eslint_config and eslint:
+            checks.append(QualityCheck("eslint", "lint", [eslint, "."]))
+
+        biome = _node_bin(project_dir, "biome")
+        if any((project_dir / c).is_file() for c in BIOME_CONFIGS) and biome:
+            checks.append(QualityCheck("biome", "lint", [biome, "lint", "."]))
+
+        has_ruff_config = (
+            (project_dir / "ruff.toml").is_file()
+            or (project_dir / ".ruff.toml").is_file()
+            or "[tool.ruff" in pyproject
+        )
+        has_flake8_config = (
+            any((project_dir / c).is_file() for c in FLAKE8_CONFIGS)
+            or "[flake8]" in setup_cfg
+            or "[flake8]" in tox_ini
+        )
+        ruff = _python_tool(project_dir, "ruff")
+        flake8 = _python_tool(project_dir, "flake8")
+        if has_ruff_config and ruff:
+            checks.append(QualityCheck("ruff", "lint", [*ruff, "check", "."]))
+        elif has_flake8_config and flake8:
+            checks.append(QualityCheck("flake8", "lint", [*flake8, "."]))
+
+    if config.type_check:
+        tsc = _node_bin(project_dir, "tsc")
+        tsconfig = project_dir / "tsconfig.json"
+        if tsconfig.is_file() and tsc:
+            # Solution-style configs (Vite's default) list no files of their own and
+            # only reference sub-projects, which plain `tsc` would skip
+            if '"references"' in _read_text(tsconfig):
+                checks.append(QualityCheck("tsc", "type_check", [tsc, "--build", "--noEmit"]))
+            else:
+                checks.append(QualityCheck("tsc", "type_check", [tsc, "--noEmit"]))
+
+        has_mypy_config = (
+            (project_dir / "mypy.ini").is_file()
+            or (project_dir / ".mypy.ini").is_file()
+            or "[tool.mypy" in pyproject
+            or "[mypy" in setup_cfg
+        )
+        mypy = _python_tool(project_dir, "mypy")
+        if is_python and has_mypy_config and mypy:
+            checks.append(QualityCheck("mypy", "type_check", [*mypy, "."]))
+
+    return checks
+
+
+def _clean_output(output: str) -> str:
+    """Strip color codes and keep stored output to a bounded size."""
+    output = ANSI_ESCAPE_RE.sub("", output).strip()
+    if len(output) <= MAX_OUTPUT_CHARS:
+        return output
+    # Keep the tail - linters usually print the summary last
+    return "...(truncated)...\n" + output[-MAX_OUTPUT_CHARS:]
+
+
+def run_check(check: QualityCheck, project_dir: Path, timeout: int) -> CheckResult:
+    """Run a single check in the project directory."""
+    start = time.monotonic()
+    env = {**os.environ, "CI": "1", "NO_COLOR": "1"}
+    # Some tools treat any FORCE_COLOR value (even "0") as "force color on"
+    env.pop("FORCE_COLOR", None)
+    try:
+        proc = subprocess.run(
+            check.command,
+            cwd=project_dir,
             capture_output=True,
             text=True,
-            encoding="utf-8",  # Fix Windows CP1252 encoding issue (#138)
+            encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            env=env,
+            stdin=subprocess.DEVNULL,
         )
-        duration_ms = int((time.time() - start) * 1000)
-        output = result.stdout + result.stderr
-        return result.returncode, output.strip(), duration_ms
-    except subprocess.TimeoutExpired:
-        duration_ms = int((time.time() - start) * 1000)
-        return 124, f"Command timed out after {timeout}s", duration_ms
-    except FileNotFoundError:
-        return 127, f"Command not found: {cmd[0]}", 0
-    except Exception as e:
-        return 1, str(e), 0
-
-
-def _detect_js_linter(project_dir: Path) -> tuple[str, list[str]] | None:
-    """
-    Detect the JavaScript/TypeScript linter to use.
-
-    Returns:
-        (name, command) tuple, or None if no linter detected
-    """
-    # Check for ESLint in node_modules/.bin (handles .cmd on Windows)
-    bin_dir = project_dir / "node_modules" / ".bin"
-    if bin_dir.exists():
-        eslint = shutil.which("eslint", path=str(bin_dir))
-        if eslint:
-            return ("eslint", [eslint, ".", "--max-warnings=0"])
-
-        # Check for Biome
-        biome = shutil.which("biome", path=str(bin_dir))
-        if biome:
-            return ("biome", [biome, "lint", "."])
-
-    # Check for package.json lint script
-    package_json = project_dir / "package.json"
-    if package_json.exists():
-        try:
-            data = json.loads(package_json.read_text())
-            scripts = data.get("scripts", {})
-            if "lint" in scripts:
-                return ("npm_lint", ["npm", "run", "lint"])
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    return None
-
-
-def _detect_python_linter(project_dir: Path) -> tuple[str, list[str]] | None:
-    """
-    Detect the Python linter to use.
-
-    Returns:
-        (name, command) tuple, or None if no linter detected
-    """
-    # Check for ruff in PATH
-    if shutil.which("ruff"):
-        return ("ruff", ["ruff", "check", "."])
-
-    # Check for flake8 in PATH
-    if shutil.which("flake8"):
-        return ("flake8", ["flake8", "."])
-
-    # Check in virtual environment (venv/Scripts on Windows, venv/bin on Unix)
-    venv_bin = project_dir / "venv" / ("Scripts" if os.name == "nt" else "bin")
-    if venv_bin.exists():
-        venv_ruff = shutil.which("ruff", path=str(venv_bin))
-        if venv_ruff:
-            return ("ruff", [venv_ruff, "check", "."])
-
-        venv_flake8 = shutil.which("flake8", path=str(venv_bin))
-        if venv_flake8:
-            return ("flake8", [venv_flake8, "."])
-
-    return None
-
-
-def _detect_type_checker(project_dir: Path) -> tuple[str, list[str]] | None:
-    """
-    Detect the type checker to use.
-
-    Returns:
-        (name, command) tuple, or None if no type checker detected
-    """
-    # TypeScript - check for tsc in node_modules/.bin (handles .cmd on Windows)
-    if (project_dir / "tsconfig.json").exists():
-        bin_dir = project_dir / "node_modules" / ".bin"
-        if bin_dir.exists():
-            tsc = shutil.which("tsc", path=str(bin_dir))
-            if tsc:
-                return ("tsc", [tsc, "--noEmit"])
-        if shutil.which("npx"):
-            # Use --no-install to fail fast if tsc is not locally installed
-            # rather than prompting/auto-downloading
-            return ("tsc", ["npx", "--no-install", "tsc", "--noEmit"])
-
-    # Python (mypy)
-    if (project_dir / "pyproject.toml").exists() or (project_dir / "setup.py").exists():
-        if shutil.which("mypy"):
-            return ("mypy", ["mypy", "."])
-
-        # Check in virtual environment (venv/Scripts on Windows, venv/bin on Unix)
-        venv_bin = project_dir / "venv" / ("Scripts" if os.name == "nt" else "bin")
-        if venv_bin.exists():
-            venv_mypy = shutil.which("mypy", path=str(venv_bin))
-            if venv_mypy:
-                return ("mypy", [venv_mypy, "."])
-
-    return None
-
-
-def run_lint_check(project_dir: Path) -> QualityCheckResult:
-    """
-    Run lint check on the project.
-
-    Automatically detects the appropriate linter based on project type.
-
-    Args:
-        project_dir: Path to the project directory
-
-    Returns:
-        QualityCheckResult with lint results
-    """
-    # Try JS/TS linter first
-    linter = _detect_js_linter(project_dir)
-    if linter is None:
-        # Try Python linter
-        linter = _detect_python_linter(project_dir)
-
-    if linter is None:
-        return {
-            "name": "lint",
-            "passed": True,
-            "output": "No linter detected, skipping lint check",
-            "duration_ms": 0,
-        }
-
-    name, cmd = linter
-    exit_code, output, duration_ms = _run_command(cmd, project_dir)
-
-    # Truncate output if too long
-    if len(output) > 5000:
-        output = output[:5000] + "\n... (truncated)"
-
-    return {
-        "name": f"lint ({name})",
-        "passed": exit_code == 0,
-        "output": output if output else "No issues found",
-        "duration_ms": duration_ms,
-    }
-
-
-def run_type_check(project_dir: Path) -> QualityCheckResult:
-    """
-    Run type check on the project.
-
-    Automatically detects the appropriate type checker based on project type.
-
-    Args:
-        project_dir: Path to the project directory
-
-    Returns:
-        QualityCheckResult with type check results
-    """
-    checker = _detect_type_checker(project_dir)
-
-    if checker is None:
-        return {
-            "name": "type_check",
-            "passed": True,
-            "output": "No type checker detected, skipping type check",
-            "duration_ms": 0,
-        }
-
-    name, cmd = checker
-    exit_code, output, duration_ms = _run_command(cmd, project_dir, timeout=120)
-
-    # Truncate output if too long
-    if len(output) > 5000:
-        output = output[:5000] + "\n... (truncated)"
-
-    return {
-        "name": f"type_check ({name})",
-        "passed": exit_code == 0,
-        "output": output if output else "No type errors found",
-        "duration_ms": duration_ms,
-    }
-
-
-def run_custom_script(
-    project_dir: Path,
-    script_path: str | None = None,
-    explicit_config: bool = False,
-) -> QualityCheckResult | None:
-    """
-    Run a custom quality check script.
-
-    Args:
-        project_dir: Path to the project directory
-        script_path: Path to the script (relative to project), defaults to .autocoder/quality-checks.sh
-        explicit_config: If True, user explicitly configured this script, so missing = error
-
-    Returns:
-        QualityCheckResult, or None if default script doesn't exist
-    """
-    user_configured = script_path is not None or explicit_config
-
-    if script_path is None:
-        script_path = ".autocoder/quality-checks.sh"
-
-    script_full_path = project_dir / script_path
-
-    if not script_full_path.exists():
-        if user_configured:
-            # User explicitly configured a script that doesn't exist - return error
-            return {
-                "name": "custom_script",
-                "passed": False,
-                "output": f"Configured script not found: {script_path}",
-                "duration_ms": 0,
-            }
-        # Default script doesn't exist - that's OK, skip silently
-        return None
-
-    # Make sure it's executable
-    try:
-        script_full_path.chmod(0o755)
-    except OSError:
-        pass
-
-    # Determine shell command based on platform and script extension
-    if os.name == "nt":  # Windows
-        ext = script_full_path.suffix.lower()
-        if ext in (".bat", ".cmd"):
-            shell_cmd = ["cmd.exe", "/c", str(script_full_path)]
-        elif ext == ".ps1":
-            shell_cmd = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(script_full_path)]
-        elif shutil.which("bash"):
-            # Git Bash or WSL available
-            shell_cmd = ["bash", str(script_full_path)]
-        else:
-            return {
-                "name": "custom_script",
-                "passed": False,
-                "output": f"Cannot run {script_full_path.suffix} script on Windows without bash. Install Git Bash or use .bat/.ps1 script.",
-                "duration_ms": 0,
-            }
-    else:  # POSIX (Linux, macOS)
-        shell_cmd = ["bash", str(script_full_path)]
-
-    exit_code, output, duration_ms = _run_command(
-        shell_cmd,
-        project_dir,
-        timeout=300,  # 5 minutes for custom scripts
-    )
-
-    # Truncate output if too long
-    if len(output) > 10000:
-        output = output[:10000] + "\n... (truncated)"
-
-    return {
-        "name": "custom_script",
-        "passed": exit_code == 0,
-        "output": output if output else "Script completed successfully",
-        "duration_ms": duration_ms,
-    }
-
-
-def verify_quality(
-    project_dir: Path,
-    do_lint: bool = True,
-    do_type_check: bool = True,
-    do_custom: bool = True,
-    custom_script_path: str | None = None,
-) -> QualityGateResult:
-    """
-    Run all configured quality checks.
-
-    Args:
-        project_dir: Path to the project directory
-        do_lint: Whether to run lint check
-        do_type_check: Whether to run type check
-        do_custom: Whether to run custom script
-        custom_script_path: Path to custom script (optional)
-
-    Returns:
-        QualityGateResult with all check results
-    """
-    checks: dict[str, QualityCheckResult] = {}
-    all_passed = True
-
-    if do_lint:
-        lint_result = run_lint_check(project_dir)
-        checks["lint"] = lint_result
-        if not lint_result["passed"]:
-            all_passed = False
-
-    if do_type_check:
-        type_result = run_type_check(project_dir)
-        checks["type_check"] = type_result
-        if not type_result["passed"]:
-            all_passed = False
-
-    if do_custom:
-        custom_result = run_custom_script(
-            project_dir,
-            custom_script_path,
-            explicit_config=custom_script_path is not None,
+        output = (proc.stdout or "") + (proc.stderr or "")
+        return CheckResult(
+            name=check.name,
+            category=check.category,
+            command=" ".join([Path(check.command[0]).name, *check.command[1:]]),
+            passed=proc.returncode == 0,
+            exit_code=proc.returncode,
+            duration_seconds=round(time.monotonic() - start, 2),
+            output=_clean_output(output),
         )
-        if custom_result is not None:
-            checks["custom_script"] = custom_result
-            if not custom_result["passed"]:
-                all_passed = False
+    except subprocess.TimeoutExpired as e:
+        partial = e.stdout or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
+        return CheckResult(
+            name=check.name,
+            category=check.category,
+            command=" ".join([Path(check.command[0]).name, *check.command[1:]]),
+            passed=False,
+            exit_code=None,
+            duration_seconds=round(time.monotonic() - start, 2),
+            output=_clean_output(f"{partial}\nTimed out after {timeout}s"),
+            timed_out=True,
+        )
+    except OSError as e:
+        return CheckResult(
+            name=check.name,
+            category=check.category,
+            command=" ".join([Path(check.command[0]).name, *check.command[1:]]),
+            passed=False,
+            exit_code=None,
+            duration_seconds=round(time.monotonic() - start, 2),
+            output=f"Failed to run {check.name}: {e}",
+        )
 
-    # Build summary
-    passed_count = sum(1 for c in checks.values() if c["passed"])
-    total_count = len(checks)
-    failed_names = [name for name, c in checks.items() if not c["passed"]]
 
-    if all_passed:
-        summary = f"All {total_count} quality checks passed"
+def run_quality_checks(project_dir: Path, config: QualityGateConfig | None = None) -> QualityReport:
+    """Detect and run all applicable quality checks for a project."""
+    project_dir = project_dir.resolve()
+    if config is None:
+        config = load_config()
+
+    # Defense in depth: never execute project tooling unless the trusted switch is on
+    if not config.enabled:
+        return QualityReport(
+            passed=True,
+            strict_mode=config.strict_mode,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            message="Quality gates are disabled; nothing was run",
+        )
+
+    checks = detect_checks(project_dir, config)
+    results = [run_check(c, project_dir, config.timeout_seconds) for c in checks]
+    passed = all(r.passed for r in results)
+
+    if not results:
+        message = "No linters or type checkers detected; nothing to verify"
+    elif passed:
+        message = f"All {len(results)} quality check(s) passed: " + ", ".join(r.name for r in results)
     else:
-        summary = f"{passed_count}/{total_count} checks passed. Failed: {', '.join(failed_names)}"
+        failed = [r.name for r in results if not r.passed]
+        message = f"{len(failed)} of {len(results)} quality check(s) failed: " + ", ".join(failed)
 
-    return {
-        "passed": all_passed,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "checks": checks,
-        "summary": summary,
-    }
-
-
-def load_quality_config(project_dir: Path) -> dict:
-    """
-    Load quality gates configuration from .autocoder/config.json.
-
-    Args:
-        project_dir: Path to the project directory
-
-    Returns:
-        Quality gates config dict with defaults applied
-    """
-    defaults = {
-        "enabled": True,
-        "strict_mode": True,
-        "checks": {
-            "lint": True,
-            "type_check": True,
-            "unit_tests": False,
-            "custom_script": None,
-        },
-    }
-
-    config_path = project_dir / ".autocoder" / "config.json"
-    if not config_path.exists():
-        return defaults
-
-    try:
-        data = json.loads(config_path.read_text())
-        quality_config = data.get("quality_gates", {})
-
-        # Merge with defaults
-        result = defaults.copy()
-        for key in ["enabled", "strict_mode"]:
-            if key in quality_config:
-                result[key] = quality_config[key]
-
-        if "checks" in quality_config:
-            result["checks"] = {**cast(dict[str, Any], defaults["checks"]), **cast(dict[str, Any], quality_config["checks"])}
-
-        return result
-    except (json.JSONDecodeError, OSError):
-        return defaults
+    return QualityReport(
+        passed=passed,
+        checks=results,
+        strict_mode=config.strict_mode,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        message=message,
+    )

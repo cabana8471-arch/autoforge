@@ -29,17 +29,6 @@ Create a `.autocoder/config.json` file in your project directory:
 {
   "version": "1.0",
 
-  "quality_gates": {
-    "enabled": true,
-    "strict_mode": true,
-    "checks": {
-      "lint": true,
-      "type_check": true,
-      "unit_tests": false,
-      "custom_script": ".autocoder/quality-checks.sh"
-    }
-  },
-
   "git_workflow": {
     "mode": "feature_branches",
     "branch_prefix": "feature/",
@@ -72,15 +61,15 @@ Create a `.autocoder/config.json` file in your project directory:
 }
 ```
 
+Quality gates are not configured in this file: the agent can write to the project directory, so they
+are switched on only through `AUTOFORGE_QUALITY_GATES` in the AutoForge environment (see `.env.example`).
+
 ### Disabling Features
 
 Each feature can be disabled individually:
 
 ```json
 {
-  "quality_gates": {
-    "enabled": false
-  },
   "git_workflow": {
     "mode": "none"
   }

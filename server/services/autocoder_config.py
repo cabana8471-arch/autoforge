@@ -4,7 +4,6 @@ Autocoder Enhanced Configuration
 
 Centralized configuration system for all Autocoder features.
 Extends the basic project_config.py with support for:
-- Quality Gates
 - Git Workflow
 - Error Recovery
 - CI/CD Integration
@@ -26,21 +25,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Type Definitions for Configuration Schema
 # =============================================================================
-
-
-class QualityChecksConfig(TypedDict, total=False):
-    """Configuration for individual quality checks."""
-    lint: bool
-    type_check: bool
-    unit_tests: bool
-    custom_script: str | None
-
-
-class QualityGatesConfig(TypedDict, total=False):
-    """Configuration for quality gates feature."""
-    enabled: bool
-    strict_mode: bool
-    checks: QualityChecksConfig
 
 
 class GitWorkflowConfig(TypedDict, total=False):
@@ -105,7 +89,6 @@ class AutocoderConfig(TypedDict, total=False):
     """Full Autocoder configuration schema."""
     version: str
     dev_command: str | None
-    quality_gates: QualityGatesConfig
     git_workflow: GitWorkflowConfig
     error_recovery: ErrorRecoveryConfig
     completion: CompletionConfig
@@ -123,16 +106,6 @@ class AutocoderConfig(TypedDict, total=False):
 DEFAULT_CONFIG: AutocoderConfig = {
     "version": "1.0",
     "dev_command": None,
-    "quality_gates": {
-        "enabled": True,
-        "strict_mode": True,
-        "checks": {
-            "lint": True,
-            "type_check": True,
-            "unit_tests": False,
-            "custom_script": None,
-        },
-    },
     "git_workflow": {
         "mode": "none",
         "branch_prefix": "feature/",
@@ -303,12 +276,6 @@ def update_autocoder_config(project_dir: Path, updates: dict[str, Any]) -> Autoc
 # =============================================================================
 
 
-def get_quality_gates_config(project_dir: Path) -> QualityGatesConfig:
-    """Get quality gates configuration for a project."""
-    config = load_autocoder_config(project_dir)
-    return config.get("quality_gates", DEFAULT_CONFIG["quality_gates"])
-
-
 def get_git_workflow_config(project_dir: Path) -> GitWorkflowConfig:
     """Get git workflow configuration for a project."""
     config = load_autocoder_config(project_dir)
@@ -342,18 +309,6 @@ def get_logging_config(project_dir: Path) -> LoggingConfig:
 # =============================================================================
 # Feature Enable/Disable Checks
 # =============================================================================
-
-
-def is_quality_gates_enabled(project_dir: Path) -> bool:
-    """Check if quality gates are enabled for a project."""
-    config = get_quality_gates_config(project_dir)
-    return config.get("enabled", True)
-
-
-def is_strict_quality_mode(project_dir: Path) -> bool:
-    """Check if strict quality mode is enabled (blocks feature_mark_passing on failure)."""
-    config = get_quality_gates_config(project_dir)
-    return config.get("enabled", True) and config.get("strict_mode", True)
 
 
 def is_security_scanning_enabled(project_dir: Path) -> bool:
