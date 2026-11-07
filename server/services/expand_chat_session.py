@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from ..schemas import FileAttachment
 from ..utils.document_extraction import DocumentExtractionError
 from .chat_constants import (
+    NO_SHELL_PROMPT_NOTE,
     ROOT_DIR,
     build_attachment_content_blocks,
     check_rate_limit_error,
@@ -237,7 +238,7 @@ class ExpandChatSession:
 
         # Replace $ARGUMENTS with absolute project path
         project_path = str(self.project_dir.resolve())
-        system_prompt = skill_content.replace("$ARGUMENTS", project_path)
+        system_prompt = skill_content.replace("$ARGUMENTS", project_path) + NO_SHELL_PROMPT_NOTE
 
         # Pass the system prompt via a file (--system-prompt-file) rather than inline
         # to avoid the Windows command line length limit (~8191 chars)
