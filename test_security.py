@@ -416,6 +416,9 @@ def test_nested_commands():
         ("npm run dev &> dev.log &", False, "&> redirect and background"),
         ("ls >| out.txt", False, ">| clobber redirect"),
         ("npm test|grep passed", False, "unspaced pipe between allowed commands"),
+        ("cat <((pkill -9 sshd))", True, "<(( is a process substitution of a subshell"),
+        ("echo $((echo a);(pkill -9 sshd))", True, "$(( that bash runs as a command substitution"),
+        ("echo $'\\N{nope}'", True, "undecodable $'...' fails closed"),
     ]
 
     with tempfile.TemporaryDirectory() as tmp:

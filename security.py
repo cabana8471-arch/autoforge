@@ -1189,7 +1189,9 @@ def _split_shell_source(source: str) -> tuple[list[str], list[str]]:
         if source.startswith("$(", i) or (quote is None and source[i:i + 2] in ("<(", ">(")):
             end = _matching_paren(source, i + 2)
             body = source[i + 2:end]
-            if body.startswith("(") and body.endswith(")"):
+            # bash reads $((...)) as arithmetic only when the inner '(' closes right
+            # before the outer ')'; '$((a);(b))' and '<((a))' run commands
+            if source.startswith("$((", i) and _matching_paren(source, i + 3) + 1 == end:
                 # Arithmetic $((...)): not a command, but may hold substitutions
                 nested.extend(_split_shell_source(body[1:-1])[1])
                 current.append(source[i:end + 1])
@@ -1463,4 +1465,8 @@ async def bash_security_hook(input_data, tool_use_id=None, context=None):
     # Get effective pkill processes (includes org/project config)
     pkill_processes = get_effective_pkill_processes(project_dir)
 
-    return _validate_shell_source(command, project_dir, allowed_commands, blocked_commands, pkill_processes)
+    try:
+        return _validate_shell_source(command, project_dir, allowed_commands, blocked_commands, pkill_processes)
+    except Exception as e:  # Fail closed: a parser error must never let a command through
+        logger.warning("bash security hook failed to validate %r: %s", command, e)
+        return {"decision": "block", "reason": f"Could not validate command ({type(e).__name__}): {command}"}
