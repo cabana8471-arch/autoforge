@@ -383,6 +383,39 @@ def test_nested_commands():
         ("git commit -m \"$(cat <<'EOF'\nFix bug\n\nsudo is mentioned here\nEOF\n)\"", False,
          "commit message heredoc"),
         ("cat > notes.txt <<'EOF'\nsudo reboot\npkill -9 sshd\nEOF", False, "quoted heredoc body"),
+        ("git commit -m \"$(cat <<'EOF'\nfix: a; more & b | c\nEOF\n)\"", False,
+         "commit message heredoc with ; & |"),
+        ("rm -rf $(echo /)", True, "rm target from a substitution"),
+        ("pkill $(echo sshd)", True, "pkill target from a substitution"),
+        ("cat <<EOF\npkill -9 sshd", True, "unterminated heredoc body is checked"),
+        # '<<' inside arithmetic or parameter expansion is not a heredoc
+        ("for ((i=0; i<<2; i++)); do echo; done\npkill -9 sshd\n2", True, "shift inside (( ))"),
+        ("echo $[1<<2]\npkill -9 sshd\n2", True, "shift inside $[ ]"),
+        ("echo ${x:-a<<2}\npkill -9 sshd\n2", True, "<< inside ${ }"),
+        # Loop keywords only count in command position
+        ("echo for | pkill -9 sshd", True, "'for' as an argument"),
+        ("echo select && pkill -9 sshd", True, "'select' as an argument"),
+        ("for i in 1 2; do echo $i; done", False, "one-line for loop"),
+        # Process substitution
+        ("cat <(pkill -9 sshd)", True, "<() process substitution"),
+        ("ls > >(pkill -9 sshd)", True, ">() process substitution"),
+        ("cat <(ls a) <(ls b)", False, "allowed process substitution"),
+        # ANSI-C quoting
+        ("echo $'a\\'b'; pkill -9 sshd", True, "escaped quote inside $'...'"),
+        ("rm -rf $'/etc'", True, "rm target in $'...'"),
+        ("$'pkill' -9 sshd", True, "command name in $'...'"),
+        ("echo $'line1\\nline2'", False, "harmless $'...'"),
+        # Control operators without spaces or next to quotes
+        ("echo 'x'; pkill -9 sshd", True, "';' after a quote"),
+        ('echo "x";pkill -9 sshd', True, "';' after a double quote"),
+        ("echo x&&pkill -9 sshd", True, "unspaced &&"),
+        ("echo x||pkill -9 sshd", True, "unspaced ||"),
+        ("echo 'x'|pkill -9 sshd", True, "unspaced pipe after a quote"),
+        ("echo 'x'& pkill -9 sshd", True, "background & after a quote"),
+        ("npm run build 2>&1 | tail -5", False, "stderr redirect and pipe"),
+        ("npm run dev &> dev.log &", False, "&> redirect and background"),
+        ("ls >| out.txt", False, ">| clobber redirect"),
+        ("npm test|grep passed", False, "unspaced pipe between allowed commands"),
     ]
 
     with tempfile.TemporaryDirectory() as tmp:

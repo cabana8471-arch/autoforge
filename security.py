@@ -270,9 +270,10 @@ def extract_commands(command_string: str) -> list[str]:
             # Shell operators indicate a new command follows
             if token in ("|", "||", "&&", "&"):
                 expect_command = True
+                in_loop_header = False
                 continue
 
-            if token in ("for", "select"):
+            if expect_command and token in ("for", "select"):
                 in_loop_header = True
                 continue
             if in_loop_header:
@@ -1015,13 +1016,18 @@ _SHELL_OPTIONS_WITH_ARGUMENT = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file
 # bash -c "bash -c '...'" chains deeper than this are refused
 MAX_NESTED_SHELL_DEPTH = 5
 
+# Stands in for a $(...) / `...` / <(...) body in the enclosing line: the body is
+# validated on its own, and the '$' keeps validators such as rm and pkill
+# treating the value as dynamic (blocked)
+_NESTED_PLACEHOLDER = "$(__nested__)"
 
-def _matching_paren(source: str, start: int) -> int:
-    """Return the index of the ')' closing the '(' just before ``start``.
+
+def _matching_paren(source: str, start: int, open_ch: str = "(", close_ch: str = ")") -> int:
+    """Return the index of the ``close_ch`` closing the ``open_ch`` just before ``start``.
 
     Respects quotes and backslash escapes. Returns ``len(source)`` when the
-    parenthesis is never closed, so the rest of the string is treated as
-    nested code (fail closed).
+    bracket is never closed, so the rest of the string is treated as nested
+    code (fail closed).
     """
     depth = 1
     quote: str | None = None
@@ -1038,14 +1044,21 @@ def _matching_paren(source: str, start: int) -> int:
                 quote = None
         elif ch in ("'", '"'):
             quote = ch
-        elif ch == "(":
+        elif ch == open_ch:
             depth += 1
-        elif ch == ")":
+        elif ch == close_ch:
             depth -= 1
             if depth == 0:
                 return i
         i += 1
     return len(source)
+
+
+def _decode_ansi_c_string(body: str) -> str:
+    """Decode the escapes of a bash $'...' string (\\n, \\t, \\', \\xHH, ...)."""
+    import codecs
+
+    return codecs.decode(body.encode("latin-1", "backslashreplace"), "unicode_escape")
 
 
 def _substitutions_in_text(text: str) -> list[str]:
@@ -1095,8 +1108,10 @@ def _split_shell_source(source: str) -> tuple[list[str], list[str]]:
 
     - split on unquoted newlines (a backslash-newline continues the line),
     - drop comments,
-    - collect the bodies of $(...) and backticks, which bash executes even
-      inside double quotes (but not inside single quotes),
+    - collect the bodies of $(...), backticks and <(...) / >(...), which bash
+      executes even inside double quotes (but not inside single quotes), and
+      leave a placeholder in the line,
+    - split at control operators (; && || | &) even without spaces,
     - skip heredoc bodies (data), while still collecting substitutions from
       bodies whose delimiter is unquoted (bash expands those).
 
@@ -1139,19 +1154,48 @@ def _split_shell_source(source: str) -> tuple[list[str], list[str]]:
             end = source.find("`", i + 1)
             end = n if end == -1 else end
             nested.append(source[i + 1:end])
+            current.append(_NESTED_PLACEHOLDER)
+            i = end + 1
+            continue
+
+        if quote is None and source.startswith("$'", i):
+            # ANSI-C quoting: backslash escapes are honoured, so \' does not end it.
+            # Re-quote the decoded value so later shlex parsing sees what bash sees.
+            j = i + 2
+            while j < n and source[j] != "'":
+                j += 2 if source[j] == "\\" else 1
+            current.append(shlex.quote(_decode_ansi_c_string(source[i + 2:j])))
+            i = j + 1
+            continue
+
+        if source.startswith("${", i) or source.startswith("$[", i):
+            # Parameter expansion / legacy arithmetic: '<<' inside is not a heredoc,
+            # but $(...) inside still runs
+            close_ch = "}" if source[i + 1] == "{" else "]"
+            end = _matching_paren(source, i + 2, source[i + 1], close_ch)
+            nested.extend(_split_shell_source(source[i + 2:end])[1])
             current.append(source[i:end + 1])
             i = end + 1
             continue
 
-        if source.startswith("$(", i):
+        if quote is None and source.startswith("((", i):
+            # Arithmetic command, e.g. for ((i=0; i<<2; i++)): may hold substitutions
+            end = _matching_paren(source, i + 1)
+            nested.extend(_split_shell_source(source[i + 2:end - 1])[1])
+            current.append(source[i:end + 1])
+            i = end + 1
+            continue
+
+        if source.startswith("$(", i) or (quote is None and source[i:i + 2] in ("<(", ">(")):
             end = _matching_paren(source, i + 2)
             body = source[i + 2:end]
             if body.startswith("(") and body.endswith(")"):
                 # Arithmetic $((...)): not a command, but may hold substitutions
                 nested.extend(_split_shell_source(body[1:-1])[1])
+                current.append(source[i:end + 1])
             else:
                 nested.append(body)
-            current.append(source[i:end + 1])
+                current.append(_NESTED_PLACEHOLDER)
             i = end + 1
             continue
 
@@ -1182,21 +1226,42 @@ def _split_shell_source(source: str) -> tuple[list[str], list[str]]:
             i = after
             continue
 
+        if ch in ";|&":
+            # Control operators separate commands even without surrounding spaces
+            # or right after a quote ("echo 'x';pkill" / "a&&b"). Redirections
+            # (2>&1, &>file, >|file) are not operators.
+            prev = current[-1] if current else ""
+            if ch == "|" and prev == ">" or ch == "&" and (prev in ("<", ">") or source.startswith("&>", i)):
+                current.append(ch)
+                i += 1
+                continue
+            finish_line()
+            i += 2 if source[i:i + 2] in (";;", "&&", "||", "|&") else 1
+            continue
+
         if ch == "\n":
             finish_line()
             i += 1
             # Heredoc bodies start on the line after the operator
             for delimiter, expands, strip_tabs in pending_heredocs:
                 body_lines = []
+                terminated = False
                 while i < n:
                     end = source.find("\n", i)
                     end = n if end == -1 else end
                     body_line = source[i:end]
                     i = end + 1
                     if (body_line.lstrip("\t") if strip_tabs else body_line) == delimiter:
+                        terminated = True
                         break
                     body_lines.append(body_line)
-                if expands:
+                if not terminated:
+                    # No delimiter line: our heredoc reading may differ from bash's,
+                    # so check the would-be body as commands (fail closed)
+                    sub_lines, sub_nested = _split_shell_source("\n".join(body_lines))
+                    lines.extend(sub_lines)
+                    nested.extend(sub_nested)
+                elif expands:
                     nested.extend(_substitutions_in_text("\n".join(body_lines)))
             pending_heredocs.clear()
             continue
