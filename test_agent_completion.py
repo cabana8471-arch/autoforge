@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import agent
+from rate_limit_utils import parse_rate_limit_marker
 
 
 class _FakeClient:
@@ -68,3 +69,19 @@ def test_reply_text_alone_does_not_end_the_loop(loop_env, tmp_path):
     _run(tmp_path, max_iterations=2)
 
     assert session.await_count == 2
+
+
+def test_feature_agent_hands_usage_limit_to_orchestrator(loop_env, tmp_path, monkeypatch, capsys):
+    session, counts = loop_env
+    counts.return_value = (1, 0, 2, 0)
+    session.return_value = ("continue", "Limit reached · resets 6pm (America/New_York)")
+    monkeypatch.setattr(agent, "get_single_feature_prompt", lambda *a, **k: "prompt")
+
+    asyncio.run(agent.run_autonomous_agent(
+        tmp_path, model="test-model", max_iterations=3, agent_type="coding", feature_id=2,
+    ))
+
+    assert session.await_count == 1
+    marker_lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("[RATE_LIMIT] retry_in=")]
+    assert len(marker_lines) == 1
+    assert parse_rate_limit_marker(marker_lines[0])[0] is True
