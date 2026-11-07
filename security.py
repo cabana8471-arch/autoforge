@@ -263,11 +263,21 @@ def extract_commands(command_string: str) -> list[str]:
 
         # Track when we expect a command vs arguments
         expect_command = True
+        # Inside a 'for/select NAME in WORDS' header: the name and words are data
+        in_loop_header = False
 
         for token in tokens:
             # Shell operators indicate a new command follows
             if token in ("|", "||", "&&", "&"):
                 expect_command = True
+                continue
+
+            if token in ("for", "select"):
+                in_loop_header = True
+                continue
+            if in_loop_header:
+                if token == "do":
+                    in_loop_header = False
                 continue
 
             # Skip shell keywords that precede commands
@@ -997,52 +1007,253 @@ def is_command_allowed(command: str, allowed_commands: set[str]) -> bool:
     return False
 
 
-async def bash_security_hook(input_data, tool_use_id=None, context=None):
+SHELL_INTERPRETERS = {"bash", "sh"}
+
+# Shell options that consume the next token as their argument
+_SHELL_OPTIONS_WITH_ARGUMENT = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+
+# bash -c "bash -c '...'" chains deeper than this are refused
+MAX_NESTED_SHELL_DEPTH = 5
+
+
+def _matching_paren(source: str, start: int) -> int:
+    """Return the index of the ')' closing the '(' just before ``start``.
+
+    Respects quotes and backslash escapes. Returns ``len(source)`` when the
+    parenthesis is never closed, so the rest of the string is treated as
+    nested code (fail closed).
     """
-    Pre-tool-use hook that validates bash commands using an allowlist.
+    depth = 1
+    quote: str | None = None
+    i = start
+    while i < len(source):
+        ch = source[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+        elif ch == "\\":
+            i += 1
+        elif quote == '"':
+            if ch == '"':
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return len(source)
 
-    Only commands in ALLOWED_COMMANDS and project-specific commands are permitted.
 
-    Args:
-        input_data: Dict containing tool_name and tool_input
-        tool_use_id: Optional tool use ID
-        context: Optional context dict with 'project_dir' key
+def _substitutions_in_text(text: str) -> list[str]:
+    """Return the bodies of $(...) and `...` found in text that expands them (e.g. a heredoc body)."""
+    scripts = []
+    i = 0
+    while i < len(text):
+        if text.startswith("$(", i):
+            end = _matching_paren(text, i + 2)
+            scripts.append(text[i + 2:end])
+            i = end + 1
+        elif text[i] == "`":
+            end = text.find("`", i + 1)
+            end = len(text) if end == -1 else end
+            scripts.append(text[i + 1:end])
+            i = end + 1
+        else:
+            i += 1
+    return scripts
+
+
+def _read_heredoc_delimiter(source: str, i: int) -> tuple[str, bool, bool, int]:
+    """Parse the delimiter after '<<' at index i.
+
+    Returns (delimiter, body_expands, strip_tabs, index_after_delimiter).
+    """
+    strip_tabs = source.startswith("-", i)
+    if strip_tabs:
+        i += 1
+    while i < len(source) and source[i] in " \t":
+        i += 1
+    start = i
+    while i < len(source) and source[i] not in " \t\n;&|<>()":
+        i += 1
+    word = source[start:i]
+    expands = not any(q in word for q in ("'", '"', "\\"))
+    delimiter = word.replace("'", "").replace('"', "").replace("\\", "")
+    return delimiter, expands, strip_tabs, i
+
+
+def _split_shell_source(source: str) -> tuple[list[str], list[str]]:
+    """Split shell source into top-level command lines and nested scripts.
+
+    The bash hook used to validate a command as one shlex token stream, so
+    anything after a newline or inside $(...) / backticks was never checked.
+    This scanner follows shell quoting rules closely enough to:
+
+    - split on unquoted newlines (a backslash-newline continues the line),
+    - drop comments,
+    - collect the bodies of $(...) and backticks, which bash executes even
+      inside double quotes (but not inside single quotes),
+    - skip heredoc bodies (data), while still collecting substitutions from
+      bodies whose delimiter is unquoted (bash expands those).
 
     Returns:
-        Empty dict to allow, or {"decision": "block", "reason": "..."} to block
+        (lines, nested_scripts)
     """
-    if input_data.get("tool_name") != "Bash":
-        return {}
+    lines: list[str] = []
+    nested: list[str] = []
+    current: list[str] = []
+    pending_heredocs: list[tuple[str, bool, bool]] = []
+    quote: str | None = None
+    i = 0
+    n = len(source)
 
-    command = input_data.get("tool_input", {}).get("command", "")
-    if not command:
-        return {}
+    def finish_line() -> None:
+        line = "".join(current).strip()
+        if line:
+            lines.append(line)
+        current.clear()
 
-    # Extract all commands from the command string
-    commands = extract_commands(command)
+    while i < n:
+        ch = source[i]
 
-    if not commands:
-        # Could not parse - fail safe by blocking
-        return {
-            "decision": "block",
-            "reason": f"Could not parse command for security validation: {command}",
-        }
+        if quote == "'":
+            current.append(ch)
+            if ch == "'":
+                quote = None
+            i += 1
+            continue
 
-    # Get project directory from context
-    project_dir = None
-    if context and isinstance(context, dict):
-        project_dir_str = context.get("project_dir")
-        if project_dir_str:
-            project_dir = Path(project_dir_str)
+        if ch == "\\" and i + 1 < n:
+            if source[i + 1] == "\n" and quote is None:
+                i += 2  # line continuation
+                continue
+            current.append(source[i:i + 2])
+            i += 2
+            continue
 
-    # Get effective commands using hierarchy resolution
-    allowed_commands, blocked_commands = get_effective_commands(project_dir)
+        if ch == "`":
+            end = source.find("`", i + 1)
+            end = n if end == -1 else end
+            nested.append(source[i + 1:end])
+            current.append(source[i:end + 1])
+            i = end + 1
+            continue
 
-    # Get effective pkill processes (includes org/project config)
-    pkill_processes = get_effective_pkill_processes(project_dir)
+        if source.startswith("$(", i):
+            end = _matching_paren(source, i + 2)
+            body = source[i + 2:end]
+            if body.startswith("(") and body.endswith(")"):
+                # Arithmetic $((...)): not a command, but may hold substitutions
+                nested.extend(_split_shell_source(body[1:-1])[1])
+            else:
+                nested.append(body)
+            current.append(source[i:end + 1])
+            i = end + 1
+            continue
+
+        if quote == '"':
+            current.append(ch)
+            if ch == '"':
+                quote = None
+            i += 1
+            continue
+
+        if ch in ("'", '"'):
+            quote = ch
+            current.append(ch)
+            i += 1
+            continue
+
+        if ch == "#" and (not current or current[-1] in " \t;&|("):
+            # Comment: skip to the end of the line
+            while i < n and source[i] != "\n":
+                i += 1
+            continue
+
+        if source.startswith("<<", i) and not source.startswith("<<<", i):
+            delimiter, expands, strip_tabs, after = _read_heredoc_delimiter(source, i + 2)
+            current.append(source[i:after])
+            if delimiter:
+                pending_heredocs.append((delimiter, expands, strip_tabs))
+            i = after
+            continue
+
+        if ch == "\n":
+            finish_line()
+            i += 1
+            # Heredoc bodies start on the line after the operator
+            for delimiter, expands, strip_tabs in pending_heredocs:
+                body_lines = []
+                while i < n:
+                    end = source.find("\n", i)
+                    end = n if end == -1 else end
+                    body_line = source[i:end]
+                    i = end + 1
+                    if (body_line.lstrip("\t") if strip_tabs else body_line) == delimiter:
+                        break
+                    body_lines.append(body_line)
+                if expands:
+                    nested.extend(_substitutions_in_text("\n".join(body_lines)))
+            pending_heredocs.clear()
+            continue
+
+        current.append(ch)
+        i += 1
+
+    finish_line()
+    return lines, nested
+
+
+def _shell_c_payloads(line: str) -> list[str] | None:
+    """Return the scripts passed to ``bash -c`` / ``sh -c`` (also ``-lc``, ``env bash -c``) in a line.
+
+    Returns None when a segment that runs a shell can't be tokenized, so the
+    caller can block instead of letting an unchecked payload through.
+    """
+    payloads = []
+    for segment in split_command_segments(line):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            if SHELL_INTERPRETERS & set(extract_commands(segment)):
+                return None
+            continue
+        for idx, token in enumerate(tokens):
+            if os.path.basename(token) not in SHELL_INTERPRETERS:
+                continue
+            j = idx + 1
+            has_c = False
+            while j < len(tokens) and tokens[j][:1] in ("-", "+") and tokens[j] not in ("-", "--"):
+                option = tokens[j]
+                if option in _SHELL_OPTIONS_WITH_ARGUMENT:
+                    j += 2
+                    continue
+                if not option.startswith("--") and "c" in option[1:]:
+                    has_c = True
+                j += 1
+            if j < len(tokens) and tokens[j] == "--":
+                j += 1
+            if has_c and j < len(tokens):
+                payloads.append(tokens[j])
+    return payloads
+
+
+def _validate_command_line(
+    line: str,
+    project_dir: Optional[Path],
+    allowed_commands: set[str],
+    blocked_commands: set[str],
+    pkill_processes: set[str],
+) -> dict:
+    """Validate the commands of one line (no newlines or substitutions) against the allowlist."""
+    commands = extract_commands(line)
 
     # Split into segments for per-command validation
-    segments = split_command_segments(command)
+    segments = split_command_segments(line)
 
     # Check each command against the blocklist and allowlist
     for cmd in commands:
@@ -1072,7 +1283,7 @@ async def bash_security_hook(input_data, tool_use_id=None, context=None):
             # first one: 'rm -rf dist && rm -rf ../x' must check both.
             cmd_segments = [segment for segment in segments if cmd in extract_commands(segment)]
             if not cmd_segments:
-                cmd_segments = [command]  # Fallback to full command
+                cmd_segments = [line]  # Fallback to full line
 
             for cmd_segment in cmd_segments:
                 if cmd == "pkill":
@@ -1093,3 +1304,98 @@ async def bash_security_hook(input_data, tool_use_id=None, context=None):
                     return {"decision": "block", "reason": reason}
 
     return {}
+
+
+def _validate_shell_source(
+    source: str,
+    project_dir: Optional[Path],
+    allowed_commands: set[str],
+    blocked_commands: set[str],
+    pkill_processes: set[str],
+    depth: int = 0,
+) -> dict:
+    """Validate shell source line by line, recursing into bash -c payloads and substitutions."""
+    if depth > MAX_NESTED_SHELL_DEPTH:
+        return {"decision": "block", "reason": "Command nests shells or substitutions too deeply to validate"}
+
+    lines, nested = _split_shell_source(source)
+    validated = False
+
+    def check_nested(script: str) -> dict:
+        result = _validate_shell_source(
+            script, project_dir, allowed_commands, blocked_commands, pkill_processes, depth + 1
+        )
+        if result:
+            return {"decision": "block", "reason": f"In nested command {script!r}: {result['reason']}"}
+        return {}
+
+    for line in lines:
+        if not extract_commands(line):
+            try:
+                shlex.split(line)
+            except ValueError:
+                return {"decision": "block", "reason": f"Could not parse command for security validation: {line}"}
+            continue  # Parses but runs nothing (e.g. 'done', 'fi', a loop header)
+        validated = True
+
+        result = _validate_command_line(line, project_dir, allowed_commands, blocked_commands, pkill_processes)
+        if result:
+            return result
+
+        payloads = _shell_c_payloads(line)
+        if payloads is None:
+            return {"decision": "block", "reason": f"Could not parse shell invocation for security validation: {line}"}
+        for payload in payloads:
+            result = check_nested(payload)
+            if result:
+                return result
+
+    for script in nested:
+        result = check_nested(script)
+        if result:
+            return result
+
+    if not validated:
+        # Could not find any command - fail safe by blocking
+        return {
+            "decision": "block",
+            "reason": f"Could not parse command for security validation: {source}",
+        }
+    return {}
+
+
+async def bash_security_hook(input_data, tool_use_id=None, context=None):
+    """
+    Pre-tool-use hook that validates bash commands using an allowlist.
+
+    Only commands in ALLOWED_COMMANDS and project-specific commands are permitted.
+
+    Args:
+        input_data: Dict containing tool_name and tool_input
+        tool_use_id: Optional tool use ID
+        context: Optional context dict with 'project_dir' key
+
+    Returns:
+        Empty dict to allow, or {"decision": "block", "reason": "..."} to block
+    """
+    if input_data.get("tool_name") != "Bash":
+        return {}
+
+    command = input_data.get("tool_input", {}).get("command", "")
+    if not command:
+        return {}
+
+    # Get project directory from context
+    project_dir = None
+    if context and isinstance(context, dict):
+        project_dir_str = context.get("project_dir")
+        if project_dir_str:
+            project_dir = Path(project_dir_str)
+
+    # Get effective commands using hierarchy resolution
+    allowed_commands, blocked_commands = get_effective_commands(project_dir)
+
+    # Get effective pkill processes (includes org/project config)
+    pkill_processes = get_effective_pkill_processes(project_dir)
+
+    return _validate_shell_source(command, project_dir, allowed_commands, blocked_commands, pkill_processes)

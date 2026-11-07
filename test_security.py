@@ -346,6 +346,61 @@ def test_validate_rm():
     return passed, failed
 
 
+def test_nested_commands():
+    """Commands hidden in bash -c, newlines and command substitution are validated."""
+    print("\nTesting nested command validation:\n")
+    passed = 0
+    failed = 0
+
+    # (command, should_block, description)
+    cases = [
+        # Shell -c payloads
+        ('bash -c "pkill -9 sshd"', True, "bash -c payload"),
+        ('bash -lc "pkill -9 sshd"', True, "bash -lc payload"),
+        ('sh -c "pkill -9 sshd"', True, "sh -c payload"),
+        ('env bash -c "pkill -9 sshd"', True, "env bash -c payload"),
+        ("bash -c 'bash -c \"pkill -9 sshd\"'", True, "nested bash -c payload"),
+        ('bash -c "npm run build && rm -rf /"', True, "compound bash -c payload"),
+        ('bash -c "npm run build"', False, "harmless bash -c payload"),
+        ('bash -c "pkill node"', False, "allowed pkill inside bash -c"),
+        # Newlines separate commands
+        ("npm run build\npkill -9 sshd", True, "command after newline"),
+        ("ls\nsudo reboot", True, "blocklisted command after newline"),
+        ("npm install\nnpm run build", False, "two allowed lines"),
+        ("npm run build \\\n  --watch", False, "backslash line continuation"),
+        ("# build the app\nnpm run build", False, "comment line"),
+        ("for f in a b; do\n  echo $f\ndone", False, "multi-line for loop"),
+        ('git commit -m "first line\n\nsecond line"', False, "newline inside quotes"),
+        # Command substitution
+        ("echo $(pkill -9 sshd)", True, "$() substitution"),
+        ("echo `pkill -9 sshd`", True, "backtick substitution"),
+        ('echo "$(pkill -9 sshd)"', True, "$() inside double quotes"),
+        ("cat <<EOF\n$(pkill -9 sshd)\nEOF", True, "$() in an unquoted heredoc body"),
+        ("echo '$(pkill -9 sshd)'", False, "$() inside single quotes is literal"),
+        ("kill $(lsof -ti:3000)", False, "allowed substitution"),
+        ("echo $((1 + 2))", False, "arithmetic expansion"),
+        # Heredocs are data
+        ("git commit -m \"$(cat <<'EOF'\nFix bug\n\nsudo is mentioned here\nEOF\n)\"", False,
+         "commit message heredoc"),
+        ("cat > notes.txt <<'EOF'\nsudo reboot\npkill -9 sshd\nEOF", False, "quoted heredoc body"),
+    ]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for cmd, should_block, description in cases:
+            input_data = {"tool_name": "Bash", "tool_input": {"command": cmd}}
+            result = asyncio.run(bash_security_hook(input_data, context={"project_dir": tmp}))
+            blocked = result.get("decision") == "block"
+            if blocked == should_block:
+                print(f"  PASS: {description}: {cmd!r}")
+                passed += 1
+            else:
+                expected = "block" if should_block else "allow"
+                print(f"  FAIL: {description}: {cmd!r} should {expected}: {result.get('reason')}")
+                failed += 1
+
+    return passed, failed
+
+
 def test_pattern_matching():
     """Test command pattern matching."""
     print("\nTesting pattern matching:\n")
@@ -1154,6 +1209,11 @@ def main():
     rm_passed, rm_failed = test_validate_rm()
     passed += rm_passed
     failed += rm_failed
+
+    # Test commands hidden in bash -c, newlines and command substitution
+    nested_passed, nested_failed = test_nested_commands()
+    passed += nested_passed
+    failed += nested_failed
 
     # Test pattern matching (Phase 1)
     pattern_passed, pattern_failed = test_pattern_matching()
