@@ -187,7 +187,7 @@ class ExpandChatSession:
             self.client = ClaudeSDKClient(
                 options=ClaudeAgentOptions(
                     model=model,
-                    effort=effort,  # type: ignore[arg-type]  # SDK 0.1.61 Literal omits "xhigh"
+                    effort=effort,  # type: ignore[arg-type, unused-ignore]  # older SDK Literal omits "xhigh"
                     cli_path=system_cli,
                     system_prompt=system_prompt,
                     allowed_tools=[

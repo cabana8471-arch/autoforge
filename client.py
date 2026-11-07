@@ -456,7 +456,7 @@ def create_client(
             model=model,
             # SDK 0.1.61's effort Literal omits "xhigh" but the CLI's
             # --effort flag accepts it; the SDK forwards the string unchanged.
-            effort=effort,  # type: ignore[arg-type]
+            effort=effort,  # type: ignore[arg-type, unused-ignore]
             cli_path=system_cli,  # Use system CLI to avoid bundled Bun crash (exit code 3)
             system_prompt="You are an expert full-stack developer building a production-quality web application.",
             setting_sources=["project"],  # Enable skills, commands, and CLAUDE.md from project dir

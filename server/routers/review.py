@@ -15,7 +15,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -313,7 +313,7 @@ def create_features_from_issues(request: CreateFeaturesRequest):
     if not db_path.exists():
         raise HTTPException(status_code=404, detail="Project database not found")
 
-    created_features = []
+    created_features: list[dict[str, Any]] = []
     session = None
 
     try:

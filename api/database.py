@@ -30,7 +30,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 from sqlalchemy.types import JSON
 
 
@@ -165,17 +165,17 @@ class ScheduleOverride(Base):
 
     __tablename__ = "schedule_overrides"
 
-    id = Column(Integer, primary_key=True, index=True)
-    schedule_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    schedule_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False
     )
 
     # Override details
-    override_type = Column(String(10), nullable=False)  # "start" or "stop"
-    expires_at = Column(DateTime, nullable=False)  # When this window ends (UTC)
+    override_type: Mapped[str] = mapped_column(String(10), nullable=False)  # "start" or "stop"
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # When this window ends (UTC)
 
     # Metadata
-    created_at = Column(DateTime, nullable=False, default=_utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
     # Relationships
     schedule = relationship("Schedule", back_populates="overrides")

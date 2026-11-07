@@ -23,6 +23,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def cleanup_stale_temp(max_age_seconds: int = MAX_AGE_SECONDS) -> dict:
     temp_dir = Path(tempfile.gettempdir())
     cutoff_time = time.time() - max_age_seconds
 
-    stats = {
+    stats: dict[str, Any] = {
         "dirs_deleted": 0,
         "files_deleted": 0,
         "bytes_freed": 0,

@@ -1195,7 +1195,9 @@ Examples:
     try:
         args = parser.parse_args()
     except SystemExit as e:
-        return e.code if e.code else 0
+        if isinstance(e.code, int):
+            return e.code
+        return 0 if e.code is None else 1
 
     # Configure logging
     logging.basicConfig(

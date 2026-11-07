@@ -211,11 +211,11 @@ class TestInjectionAttempts:
 
     def test_none_input(self):
         with pytest.raises(ValueError, match="cannot be empty"):
-            validate_custom_command_strict(None)  # type: ignore[arg-type]
+            validate_custom_command_strict(None)
 
     def test_integer_input(self):
         with pytest.raises(ValueError, match="cannot be empty"):
-            validate_custom_command_strict(123)  # type: ignore[arg-type]
+            validate_custom_command_strict(123)
 
     def test_python_dash_c_uppercase(self):
         with pytest.raises(ValueError, match="python -c is not allowed"):

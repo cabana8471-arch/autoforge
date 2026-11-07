@@ -242,10 +242,15 @@ class VisualRegressionTester:
             # Calculate difference
             diff = ImageChops.difference(baseline, current)
 
-            # Count different pixels
-            diff_data = diff.getdata()
+            # Indices of pixels whose summed RGB difference exceeds the threshold.
+            # tobytes() works on every Pillow version (getdata() is removed in Pillow 14).
+            raw = diff.tobytes()  # RGB: 3 bytes per pixel
+            changed = [
+                i // 3 for i in range(0, len(raw), 3)
+                if raw[i] + raw[i + 1] + raw[i + 2] > 30  # Threshold for "different"
+            ]
             total_pixels = baseline.size[0] * baseline.size[1]
-            diff_pixels = sum(1 for pixel in diff_data if sum(pixel) > 30)  # Threshold for "different"
+            diff_pixels = len(changed)
 
             diff_percentage = (diff_pixels / total_pixels) * 100
 
@@ -255,11 +260,9 @@ class VisualRegressionTester:
                 diff_highlight = Image.new("RGBA", baseline.size, (0, 0, 0, 0))
                 draw = ImageDraw.Draw(diff_highlight)
 
-                for y in range(baseline.size[1]):
-                    for x in range(baseline.size[0]):
-                        pixel = diff.getpixel((x, y))
-                        if sum(pixel) > 30:
-                            draw.point((x, y), fill=(255, 0, 0, 128))  # Red highlight
+                width = baseline.size[0]
+                for index in changed:
+                    draw.point((index % width, index // width), fill=(255, 0, 0, 128))  # Red highlight
 
                 # Composite with original
                 result = Image.alpha_composite(baseline.convert("RGBA"), diff_highlight)

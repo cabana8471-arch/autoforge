@@ -159,7 +159,7 @@ class SpecChatSession:
             self.client = ClaudeSDKClient(
                 options=ClaudeAgentOptions(
                     model=model,
-                    effort=effort,  # type: ignore[arg-type]  # SDK 0.1.61 Literal omits "xhigh"
+                    effort=effort,  # type: ignore[arg-type, unused-ignore]  # older SDK Literal omits "xhigh"
                     cli_path=system_cli,
                     # System prompt loaded from CLAUDE.md via setting_sources
                     # Include "user" for global skills and subagents from ~/.claude/

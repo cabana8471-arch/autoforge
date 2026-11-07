@@ -371,7 +371,7 @@ class TerminalSession:
             # Reap zombie if not already reaped
             if self._child_pid is not None:
                 try:
-                    os.waitpid(self._child_pid, os.WNOHANG)  # type: ignore[attr-defined]  # Unix-only method, guarded by runtime platform selection
+                    os.waitpid(self._child_pid, os.WNOHANG)  # type: ignore[attr-defined, unused-ignore]  # Unix-only method, guarded by runtime platform selection
                 except ChildProcessError:
                     pass
                 except Exception:
