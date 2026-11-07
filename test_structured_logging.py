@@ -124,16 +124,34 @@ class TestStructuredLogger(TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_creates_logs_directory(self):
-        """Test that logger creates .autocoder directory."""
+        """Test that logger creates the .autoforge directory."""
         _logger = get_logger(self.project_dir, agent_id="test", console_output=False)  # noqa: F841
-        autocoder_dir = self.project_dir / ".autocoder"
-        self.assertTrue(autocoder_dir.exists())
+        self.assertTrue((self.project_dir / ".autoforge").exists())
+        self.assertFalse((self.project_dir / ".autocoder").exists())
 
     def test_creates_logs_db(self):
-        """Test that logger creates logs.db file."""
+        """Test that logger creates .autoforge/logs.db."""
         _logger = get_logger(self.project_dir, agent_id="test", console_output=False)  # noqa: F841
-        db_path = self.project_dir / ".autocoder" / "logs.db"
+        db_path = self.project_dir / ".autoforge" / "logs.db"
         self.assertTrue(db_path.exists())
+
+    def test_reuses_legacy_autocoder_logs_db(self):
+        """Test that an existing legacy .autocoder/logs.db keeps being used."""
+        legacy_db = self.project_dir / ".autocoder" / "logs.db"
+        legacy_db.parent.mkdir(parents=True)
+        StructuredLogHandler(legacy_db)
+
+        logger = get_logger(self.project_dir, agent_id="test", console_output=False)
+
+        self.assertEqual(logger.db_path, legacy_db)
+        self.assertFalse((self.project_dir / ".autoforge" / "logs.db").exists())
+
+    def test_query_on_project_without_logs_returns_empty(self):
+        """Test that querying a project that never logged returns no rows instead of failing."""
+        query = get_log_query(self.project_dir)
+
+        self.assertEqual(query.query(), [])
+        self.assertEqual(query.count(), 0)
 
     def test_log_info(self):
         """Test info level logging."""
@@ -437,7 +455,7 @@ class TestCleanup(TestCase):
     def test_cleanup_old_entries(self):
         """Test that old entries are cleaned up when max_entries is exceeded."""
         # Create handler with low max_entries
-        db_path = self.project_dir / ".autocoder" / "logs.db"
+        db_path = self.project_dir / ".autoforge" / "logs.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         handler = StructuredLogHandler(db_path, max_entries=10)
         # Set low cleanup interval so cleanup triggers during test

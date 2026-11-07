@@ -327,6 +327,7 @@ class TestGenerateDesignTokens:
             assert result is not None
             assert result.exists()
             assert result.name == "design-tokens.json"
+            assert result.parent == project_dir / ".autoforge"
 
             tokens = json.loads(result.read_text())
             assert tokens["borders"]["width"] == "4px"

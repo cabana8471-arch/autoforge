@@ -127,6 +127,26 @@ def get_assistant_db_path(project_dir: Path) -> Path:
     return _resolve_path(project_dir, "assistant.db")
 
 
+def get_logs_db_path(project_dir: Path) -> Path:
+    """Resolve the path to the structured logs database ``logs.db``."""
+    return _resolve_path(project_dir, "logs.db")
+
+
+def get_design_tokens_path(project_dir: Path) -> Path:
+    """Resolve the path to ``design-tokens.json``."""
+    return _resolve_path(project_dir, "design-tokens.json")
+
+
+def get_review_reports_dir(project_dir: Path) -> Path:
+    """Resolve the ``review-reports/`` directory."""
+    return _resolve_dir(project_dir, "review-reports")
+
+
+def get_security_reports_dir(project_dir: Path) -> Path:
+    """Resolve the ``security-reports/`` directory."""
+    return _resolve_dir(project_dir, "security-reports")
+
+
 def get_agent_lock_path(project_dir: Path) -> Path:
     """Resolve the path to ``.agent.lock``."""
     return _resolve_path(project_dir, ".agent.lock")

@@ -12,7 +12,7 @@ Features:
 
 Integration:
 - Can be run standalone or as part of quality gates
-- Results stored in project's .autocoder/security-reports/
+- Results stored in project's .autoforge/security-reports/
 """
 
 import json
@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
+
+from autoforge_paths import get_security_reports_dir
 
 
 class Severity(str, Enum):
@@ -359,7 +361,7 @@ class SecurityScanner:
             scan_dependencies: Run npm audit / pip-audit
             scan_secrets: Scan for hardcoded secrets
             scan_code: Scan for code vulnerabilities
-            save_report: Save report to .autocoder/security-reports/
+            save_report: Save report to .autoforge/security-reports/
 
         Returns:
             ScanResult with all findings
@@ -666,7 +668,7 @@ class SecurityScanner:
 
     def _save_report(self, result: ScanResult) -> None:
         """Save scan report to file."""
-        reports_dir = self.project_dir / ".autocoder" / "security-reports"
+        reports_dir = get_security_reports_dir(self.project_dir)
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

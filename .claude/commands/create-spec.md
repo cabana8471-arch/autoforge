@@ -149,7 +149,7 @@ Ask the user which visual style they prefer. This step configures design tokens 
 
 **Behavior:**
 - If user skips or chooses "Modern/Clean", no design tokens file is generated
-- Other styles generate `.autocoder/design-tokens.json` with appropriate presets
+- Other styles generate `.autoforge/design-tokens.json` with appropriate presets
 - The coding agent will apply these tokens when building components
 
 ### Phase 3d: Database Requirements (MANDATORY)
@@ -525,7 +525,7 @@ Create a new file using this XML structure:
     <visual_style>
       <!-- Based on Phase 3c selection -->
       <style>[default | neobrutalism | glassmorphism | retro | custom]</style>
-      <design_tokens_path>[.autocoder/design-tokens.json if style != default, empty otherwise]</design_tokens_path>
+      <design_tokens_path>[.autoforge/design-tokens.json if style != default, empty otherwise]</design_tokens_path>
     </visual_style>
   </design_system>
 

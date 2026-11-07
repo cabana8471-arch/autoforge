@@ -33,6 +33,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+from autoforge_paths import get_review_reports_dir
+
 logger = logging.getLogger(__name__)
 
 
@@ -525,7 +527,7 @@ class ReviewAgent:
 
     def save_report(self, report: ReviewReport) -> Path:
         """Save review report to file."""
-        reports_dir = self.project_dir / ".autocoder" / "review-reports"
+        reports_dir = get_review_reports_dir(self.project_dir)
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

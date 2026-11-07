@@ -33,6 +33,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional, cast
 
+from autoforge_paths import get_logs_db_path
+
 # Type aliases
 # Note: Python's logging uses "warning" but we normalize to "warn" for consistency
 LogLevel = Literal["debug", "info", "warn", "warning", "error"]
@@ -97,6 +99,52 @@ class StructuredLogEntry:
         return json.dumps(self.to_dict())
 
 
+def _init_log_database(db_path: Path) -> None:
+    """Create the logs table and indexes if they do not exist."""
+    # Use context manager to ensure connection is closed on errors
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+        # Enable WAL mode for better concurrency with parallel agents
+        # WAL allows readers and writers to work concurrently without blocking
+        cursor.execute("PRAGMA journal_mode=WAL")
+
+        # Create logs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                level TEXT NOT NULL,
+                message TEXT NOT NULL,
+                agent_id TEXT,
+                feature_id INTEGER,
+                tool_name TEXT,
+                duration_ms INTEGER,
+                extra TEXT
+            )
+        """)
+
+        # Create indexes for common queries
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_logs_timestamp
+            ON logs(timestamp)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_logs_level
+            ON logs(level)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_logs_agent_id
+            ON logs(agent_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_logs_feature_id
+            ON logs(feature_id)
+        """)
+
+        conn.commit()
+
+
 class StructuredLogHandler(logging.Handler):
     """
     Custom logging handler that stores structured logs in SQLite.
@@ -122,48 +170,7 @@ class StructuredLogHandler(logging.Handler):
     def _init_database(self) -> None:
         """Initialize the SQLite database for logs."""
         with self._lock:
-            # Use context manager to ensure connection is closed on errors
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-
-                # Enable WAL mode for better concurrency with parallel agents
-                # WAL allows readers and writers to work concurrently without blocking
-                cursor.execute("PRAGMA journal_mode=WAL")
-
-                # Create logs table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS logs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp TEXT NOT NULL,
-                        level TEXT NOT NULL,
-                        message TEXT NOT NULL,
-                        agent_id TEXT,
-                        feature_id INTEGER,
-                        tool_name TEXT,
-                        duration_ms INTEGER,
-                        extra TEXT
-                    )
-                """)
-
-                # Create indexes for common queries
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_logs_timestamp
-                    ON logs(timestamp)
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_logs_level
-                    ON logs(level)
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_logs_agent_id
-                    ON logs(agent_id)
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_logs_feature_id
-                    ON logs(feature_id)
-                """)
-
-                conn.commit()
+            _init_log_database(self.db_path)
 
     def emit(self, record: logging.LogRecord) -> None:
         """Store a log record in the database."""
@@ -250,7 +257,7 @@ class StructuredLogger:
     ):
         self.project_dir = Path(project_dir)
         self.agent_id = agent_id
-        self.db_path = self.project_dir / ".autocoder" / "logs.db"
+        self.db_path = get_logs_db_path(self.project_dir)
 
         # Ensure directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -663,5 +670,9 @@ def get_log_query(project_dir: Path) -> LogQuery:
     Returns:
         LogQuery instance
     """
-    db_path = Path(project_dir) / ".autocoder" / "logs.db"
+    db_path = get_logs_db_path(Path(project_dir))
+    if not db_path.exists():
+        # No agent has logged yet: create an empty schema so queries return no rows
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        _init_log_database(db_path)
     return LogQuery(db_path)
