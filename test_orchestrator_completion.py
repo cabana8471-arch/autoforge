@@ -97,3 +97,17 @@ class TestTestingAgentGating:
         orchestrator._maintain_testing_agents(features)
 
         spawn.assert_called_once()
+
+
+class TestStalledQueueReport:
+    def test_report_names_each_blocker_once(self, orchestrator, capsys):
+        features = [_feature(1, passes=True), _feature(2), _feature(3, deps=[2]), _feature(4, deps=[99])]
+        orchestrator._failure_counts[2] = MAX_FEATURE_RETRIES
+
+        orchestrator._report_stalled_queue(features)
+        orchestrator._report_stalled_queue(features)
+
+        out = capsys.readouterr().out
+        assert out.count("No features can be started") == 1
+        assert "Feature #3: depends on feature(s) that failed too many times #2" in out
+        assert "Feature #4: depends on non-existent feature(s) #99" in out
