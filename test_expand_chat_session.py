@@ -217,8 +217,11 @@ def _start_session(tmp_path: Path) -> dict[str, Any]:
         await session.close()
         return chunks
 
+    # Stub the registry lookups so the test never creates ~/.autoforge/registry.db
     with patch.object(expand_chat_session, "ClaudeSDKClient", _CapturingClient), \
-            patch.object(expand_chat_session, "find_claude_cli", return_value="/usr/bin/claude"):
+            patch.object(expand_chat_session, "find_claude_cli", return_value="/usr/bin/claude"), \
+            patch("registry.get_effective_sdk_env", return_value={}), \
+            patch("registry.get_effort_setting", return_value=None):
         chunks = asyncio.run(run())
 
     # The fake client aborts init, so the session must report an error
