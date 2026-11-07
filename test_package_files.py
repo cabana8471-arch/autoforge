@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parent
 
 
 def _package_files() -> list[str]:
-    return json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["files"]
+    files: list[str] = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["files"]
+    return files
 
 
 def _shipped_python_files(entries: list[str]) -> list[Path]:
@@ -39,7 +40,7 @@ def _shipped_python_files(entries: list[str]) -> list[Path]:
 
 
 def _imported_top_level_names(path: Path) -> set[str]:
-    names = set()
+    names: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
         if isinstance(node, ast.Import):
             names.update(alias.name.split(".")[0] for alias in node.names)
