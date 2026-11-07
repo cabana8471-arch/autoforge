@@ -492,7 +492,7 @@ def get_workflow(project_dir: Path) -> GitWorkflow:
     """
     Get git workflow manager for a project.
 
-    Reads configuration from .autocoder/config.json.
+    Reads configuration from .autoforge/config.json (or the legacy .autocoder/config.json).
 
     Args:
         project_dir: Project directory

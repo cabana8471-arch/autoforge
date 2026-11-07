@@ -10,7 +10,8 @@ Extends the basic project_config.py with support for:
 - Import Settings
 - Completion Settings
 
-Configuration is stored in {project_dir}/.autocoder/config.json.
+Configuration is stored in {project_dir}/.autoforge/config.json (legacy projects:
+{project_dir}/.autocoder/config.json), the same file project_config.py uses.
 """
 
 import copy
@@ -153,8 +154,19 @@ DEFAULT_CONFIG: AutocoderConfig = {
 
 
 def _get_config_path(project_dir: Path) -> Path:
-    """Get the path to the project config file."""
-    return project_dir / ".autocoder" / "config.json"
+    """Get the path to the project config file.
+
+    Same lookup order as ``project_config._get_config_path`` so both modules
+    use one file: ``.autoforge/config.json``, then the legacy
+    ``.autocoder/config.json``; new files go to ``.autoforge/``.
+    """
+    new_path = project_dir / ".autoforge" / "config.json"
+    if new_path.exists():
+        return new_path
+    old_path = project_dir / ".autocoder" / "config.json"
+    if old_path.exists():
+        return old_path
+    return new_path
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -229,7 +241,7 @@ def save_autocoder_config(project_dir: Path, config: AutocoderConfig) -> None:
     """
     Save the Autocoder configuration to disk.
 
-    Creates the .autocoder directory if it doesn't exist.
+    Creates the config directory (.autoforge/ for new projects) if it doesn't exist.
 
     Args:
         project_dir: Path to the project directory

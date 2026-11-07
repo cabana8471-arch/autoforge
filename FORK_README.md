@@ -18,12 +18,12 @@ with additional features for improved developer experience.
 
 ### Configuration
 
-All new features can be configured via `.autocoder/config.json`.
+All new features can be configured via `.autoforge/config.json` (legacy projects: `.autocoder/config.json`).
 See [Configuration Guide](#configuration) for details.
 
 ## Configuration
 
-Create a `.autocoder/config.json` file in your project directory:
+Create a `.autoforge/config.json` file in your project directory (a legacy `.autocoder/config.json` is still read when `.autoforge/config.json` is absent):
 
 ```json
 {
