@@ -116,3 +116,54 @@ class TestAutocoderMigration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSymlinkedLegacyPaths(unittest.TestCase):
+    """Legacy paths that are symlinks are never followed: the migration runs outside
+    the agent sandbox, so following them would move or copy files from anywhere."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.project = root / "project"
+        self.project.mkdir()
+        self.outside = root / "outside"
+        self.outside.mkdir()
+        (self.outside / "id_rsa").write_text("secret")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_symlinked_autocoder_dir_is_not_merged(self):
+        (self.project / ".autoforge").mkdir()
+        (self.project / ".autocoder").symlink_to(self.outside, target_is_directory=True)
+
+        migrate_project_layout(self.project)
+
+        self.assertEqual((self.outside / "id_rsa").read_text(), "secret")
+        self.assertFalse((self.project / ".autoforge" / "id_rsa").exists())
+
+    def test_symlinked_autocoder_dir_is_not_renamed(self):
+        (self.project / ".autocoder").symlink_to(self.outside, target_is_directory=True)
+
+        migrate_project_layout(self.project)
+
+        self.assertFalse((self.project / ".autoforge").is_symlink())
+        self.assertFalse((self.outside / ".gitignore").exists())
+
+    def test_symlinked_prompts_dir_is_not_copied(self):
+        (self.project / "prompts").symlink_to(self.outside, target_is_directory=True)
+
+        migrate_project_layout(self.project)
+
+        self.assertFalse((self.project / ".autoforge" / "prompts" / "id_rsa").exists())
+
+    def test_symlinked_entry_inside_autocoder_is_left_alone(self):
+        (self.project / ".autoforge").mkdir()
+        (self.project / ".autocoder").mkdir()
+        (self.project / ".autocoder" / "link").symlink_to(self.outside / "id_rsa")
+
+        migrate_project_layout(self.project)
+
+        self.assertFalse((self.project / ".autoforge" / "link").exists())
+        self.assertEqual((self.outside / "id_rsa").read_text(), "secret")

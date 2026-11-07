@@ -244,12 +244,13 @@ def _merge_autocoder_dir(old_dir: Path, new_dir: Path) -> list[str]:
     """Move entries from a legacy ``.autocoder/`` into an existing ``.autoforge/``.
 
     Entries already present in ``.autoforge/`` are left untouched (the new
-    location wins).  ``.autocoder/`` is removed once it is empty.
+    location wins), and symlinked entries are never moved.
+    ``.autocoder/`` is removed once it is empty.
     """
     migrated: list[str] = []
     for entry in sorted(old_dir.iterdir()):
         dest = new_dir / entry.name
-        if dest.exists():
+        if dest.exists() or entry.is_symlink():
             continue
         try:
             shutil.move(str(entry), str(dest))
@@ -292,7 +293,12 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
     old_autocoder_dir = project_dir / ".autocoder"
     new_autoforge_dir = project_dir / ".autoforge"
     migrated: list[str] = []
-    if old_autocoder_dir.is_dir() and not new_autoforge_dir.exists():
+    # Never follow symlinks: this runs outside the agent's sandbox, and a legacy
+    # path the agent turned into a symlink would make us move or copy files from
+    # anywhere into the project.
+    if old_autocoder_dir.is_symlink():
+        logger.warning("Not migrating %s: it is a symlink", old_autocoder_dir)
+    elif old_autocoder_dir.is_dir() and not new_autoforge_dir.exists():
         try:
             old_autocoder_dir.rename(new_autoforge_dir)
             logger.info("Migrated .autocoder/ -> .autoforge/")
@@ -310,7 +316,7 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
     try:
         old_prompts = project_dir / "prompts"
         new_prompts = autoforge_dir / "prompts"
-        if old_prompts.exists() and old_prompts.is_dir() and not new_prompts.exists():
+        if old_prompts.is_dir() and not old_prompts.is_symlink() and not new_prompts.exists():
             shutil.copytree(str(old_prompts), str(new_prompts))
             shutil.rmtree(str(old_prompts))
             migrated.append("prompts/ -> .autoforge/prompts/")
@@ -324,7 +330,7 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         try:
             old_db = project_dir / db_name
             new_db = autoforge_dir / db_name
-            if old_db.exists() and not new_db.exists():
+            if old_db.exists() and not old_db.is_symlink() and not new_db.exists():
                 # Flush WAL to ensure all data is in the main database file
                 conn = sqlite3.connect(str(old_db))
                 try:
@@ -375,7 +381,7 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         try:
             old_file = project_dir / filename
             new_file = autoforge_dir / filename
-            if old_file.exists() and not new_file.exists():
+            if old_file.exists() and not old_file.is_symlink() and not new_file.exists():
                 shutil.move(str(old_file), str(new_file))
                 migrated.append(f"{filename} -> .autoforge/{filename}")
                 logger.info("Migrated %s -> .autoforge/%s", filename, filename)
