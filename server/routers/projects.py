@@ -587,7 +587,7 @@ async def update_project_settings(name: str, settings: ProjectSettingsUpdate):
 async def get_detach_status(name: str):
     """Get detach status for a project."""
     _init_imports()
-    (_, _, get_project_path, _, _, _, _) = _get_registry_functions()
+    (_, _, get_project_path, _, _, _, _, _, _) = _get_registry_functions()
 
     name = validate_project_name(name)
     project_dir = get_project_path(name)
@@ -612,7 +612,7 @@ async def get_detach_status(name: str):
 async def detach_project(name: str):
     """Detach a project by moving Autocoder files to backup."""
     _init_imports()
-    (_, _, get_project_path, _, _, _, _) = _get_registry_functions()
+    (_, _, get_project_path, _, _, _, _, _, _) = _get_registry_functions()
 
     name = validate_project_name(name)
     project_dir = get_project_path(name)
@@ -650,7 +650,7 @@ async def detach_project(name: str):
 async def reattach_project(name: str):
     """Reattach a project by restoring Autocoder files from backup."""
     _init_imports()
-    (_, _, get_project_path, _, _, _, _) = _get_registry_functions()
+    (_, _, get_project_path, _, _, _, _, _, _) = _get_registry_functions()
 
     name = validate_project_name(name)
     project_dir = get_project_path(name)
