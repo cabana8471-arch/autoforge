@@ -20,6 +20,8 @@ jobs:
         run: ruff check .
       - name: Run security tests
         run: python test_security.py
+      - name: Run pytest suite
+        run: python -m pytest -q test_*.py
 
   ui:
     runs-on: ubuntu-latest

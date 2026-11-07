@@ -1,4 +1,6 @@
 claude-agent-sdk>=0.1.39,<0.2.0
+# feature_mcp.py uses the mcp 1.x FastMCP API (renamed to MCPServer in mcp 2.x)
+mcp>=1.19.0,<2.0.0
 python-dotenv>=1.0.0
 sqlalchemy>=2.0.0
 fastapi>=0.115.0
@@ -19,4 +21,5 @@ python-pptx>=1.0.0
 ruff>=0.8.0
 mypy>=1.13.0
 pytest>=8.0.0
+pytest-asyncio>=0.23.0
 types-PyYAML>=6.0.0
