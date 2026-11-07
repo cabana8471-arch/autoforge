@@ -129,6 +129,8 @@ class SpecChatSession:
                     "Write(./**)",
                     "Edit(./**)",
                     "Glob(./**)",
+                    "WebFetch",
+                    "WebSearch",
                 ],
                 # No terminal in the web UI means nobody can approve a shell
                 # command, so remove shell access outright (see issue #14)

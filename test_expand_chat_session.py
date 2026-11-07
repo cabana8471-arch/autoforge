@@ -3,7 +3,9 @@ Expand Chat Session Tests
 =========================
 
 Verifies that features created through the feature MCP tools during an
-expand-project chat are reported to the UI as ``features_created`` events.
+expand-project chat are reported to the UI as ``features_created`` events,
+and that the session grants and advertises the web tools (WebFetch/WebSearch,
+issue #86) while keeping file mutation and Bash disabled.
 
 Run with: python -m pytest test_expand_chat_session.py
 """
@@ -11,6 +13,8 @@ Run with: python -m pytest test_expand_chat_session.py
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 from claude_agent_sdk.types import (
     AssistantMessage,
@@ -21,6 +25,7 @@ from claude_agent_sdk.types import (
     UserMessage,
 )
 
+from server.services import expand_chat_session
 from server.services.expand_chat_session import ExpandChatSession, parse_created_features
 
 BULK = "mcp__features__feature_create_bulk"
@@ -173,3 +178,80 @@ def test_parse_single_wrapped_in_fastmcp_result():
     assert parse_created_features(SINGLE, {}, _text_content({"result": inner})) == [
         {"id": 4, "name": "Export CSV", "category": "data"},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Tool permissions (#86)
+# ---------------------------------------------------------------------------
+
+
+class _CapturingClient:
+    """Stand-in for ClaudeSDKClient that records options and refuses to connect."""
+
+    captured: dict[str, Any] = {}
+
+    def __init__(self, options: Any) -> None:
+        _CapturingClient.captured["options"] = options
+
+    async def __aenter__(self) -> "_CapturingClient":
+        options = _CapturingClient.captured["options"]
+        _CapturingClient.captured["settings"] = json.loads(Path(options.settings).read_text(encoding="utf-8"))
+        # The prompt goes to the CLI via --system-prompt-file; read it before close() deletes it
+        _CapturingClient.captured["prompt"] = Path(options.system_prompt["path"]).read_text(encoding="utf-8")
+        raise RuntimeError("stop after capture")
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+
+def _start_session(tmp_path: Path) -> dict[str, Any]:
+    prompts_dir = tmp_path / ".autoforge" / "prompts"
+    prompts_dir.mkdir(parents=True)
+    (prompts_dir / "app_spec.txt").write_text("<project_specification/>", encoding="utf-8")
+
+    session = ExpandChatSession("demo", tmp_path)
+    _CapturingClient.captured = {}
+
+    async def run() -> list[dict]:
+        chunks = [chunk async for chunk in session.start()]
+        await session.close()
+        return chunks
+
+    with patch.object(expand_chat_session, "ClaudeSDKClient", _CapturingClient), \
+            patch.object(expand_chat_session, "find_claude_cli", return_value="/usr/bin/claude"):
+        chunks = asyncio.run(run())
+
+    # The fake client aborts init, so the session must report an error
+    assert any(c.get("type") == "error" for c in chunks)
+    return _CapturingClient.captured
+
+
+def test_web_tools_are_allowed(tmp_path: Path) -> None:
+    options = _start_session(tmp_path)["options"]
+    assert "WebFetch" in options.allowed_tools
+    assert "WebSearch" in options.allowed_tools
+    assert "WebFetch" not in options.disallowed_tools
+    assert "WebSearch" not in options.disallowed_tools
+
+
+def test_settings_file_allows_web_tools(tmp_path: Path) -> None:
+    permissions = _start_session(tmp_path)["settings"]["permissions"]
+    assert "WebFetch" in permissions["allow"]
+    assert "WebSearch" in permissions["allow"]
+    assert "WebFetch" not in permissions["deny"]
+    assert "WebSearch" not in permissions["deny"]
+
+
+def test_system_prompt_advertises_web_tools(tmp_path: Path) -> None:
+    prompt = _start_session(tmp_path)["prompt"]
+    assert "You ARE allowed to use WebFetch and WebSearch" in prompt
+    assert str(tmp_path.resolve()) in prompt  # $ARGUMENTS still substituted
+
+
+def test_mutation_tools_remain_disabled(tmp_path: Path) -> None:
+    captured = _start_session(tmp_path)
+    options = captured["options"]
+    for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"):
+        assert tool not in options.allowed_tools
+        assert tool in options.disallowed_tools
+        assert tool in captured["settings"]["permissions"]["deny"]
