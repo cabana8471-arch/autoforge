@@ -123,6 +123,7 @@ python -m pytest test_rate_limit_utils.py     # Rate limit tests (22 tests)
 python -m pytest test_quality_gates.py        # Quality gate tests
 python -m pytest test_regression_selection.py # Regression test selection tests (6 tests)
 python -m pytest test_file_state_guard.py     # Stale-read Write/Edit loop guard (8 tests)
+python -m pytest test_database_journal.py     # SQLite journal mode / WAL fallback tests
 ```
 
 ### React UI

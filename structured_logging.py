@@ -29,11 +29,13 @@ import logging
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional, cast
 
+from api.database import fall_back_to_rollback_journal, is_wal_io_error, select_journal_mode
 from autoforge_paths import get_logs_db_path
 
 # Type aliases
@@ -121,16 +123,29 @@ def _init_log_database(db_path: Path) -> None:
 
 
 def _create_log_schema(db_path: Path) -> None:
-    """Enable WAL (if not already on) and create the logs table and indexes."""
-    # Use context manager to ensure connection is closed on errors
-    with sqlite3.connect(db_path) as conn:
+    """Set the journal mode and create the logs table and indexes.
+
+    WAL (better concurrency with parallel agents) is used only where it works,
+    with the same rules and "disk I/O error" fallback as features.db (#79).
+    """
+    journal_mode = select_journal_mode(db_path)
+    try:
+        _write_log_schema(db_path, journal_mode)
+    except sqlite3.OperationalError as e:
+        if journal_mode != "WAL" or not is_wal_io_error(e):
+            raise
+        fall_back_to_rollback_journal(db_path, journal_mode, e)
+        _write_log_schema(db_path, "DELETE")
+
+
+def _write_log_schema(db_path: Path, journal_mode: str) -> None:
+    """Switch logs.db to ``journal_mode`` (if not already) and create its schema."""
+    with closing(sqlite3.connect(db_path)) as conn:
         cursor = conn.cursor()
 
-        # Enable WAL mode for better concurrency with parallel agents
-        # WAL allows readers and writers to work concurrently without blocking.
-        # The mode is persistent, so only switch when the file is not WAL yet.
-        if cursor.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
-            cursor.execute("PRAGMA journal_mode=WAL")
+        # The mode is persistent, so only switch when the file is in another mode.
+        if cursor.execute("PRAGMA journal_mode").fetchone()[0].lower() != journal_mode.lower():
+            cursor.execute(f"PRAGMA journal_mode={journal_mode}")
 
         # Create logs table
         cursor.execute("""
