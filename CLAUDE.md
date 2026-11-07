@@ -156,7 +156,7 @@ The `autoforge` command is a Node.js wrapper that manages the Python environment
 - `requirements-prod.txt` - Runtime-only Python deps (excludes ruff, mypy, pytest)
 - `.npmignore` - Excludes dev files, tests, UI source from the published tarball
 
-Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publishes ~600KB tarball with 84 files)
+Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publishes a ~1 MB tarball with ~145 files; `test_package_files.py` fails when shipped code imports a repo-root module that `files` omits)
 
 ### Core Python Modules
 
