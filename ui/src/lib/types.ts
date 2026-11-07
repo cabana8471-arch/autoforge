@@ -61,6 +61,7 @@ export interface DirectoryEntry {
   name: string
   path: string
   is_directory: boolean
+  is_hidden: boolean
   has_children: boolean
 }
 

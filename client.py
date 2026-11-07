@@ -8,7 +8,6 @@ Functions for creating and configuring the Claude Agent SDK client.
 import json
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import HookContext, HookInput, HookMatcher, SyncHookJSONOutput
 from dotenv import load_dotenv
 
+from env_constants import find_claude_cli
 from quality_gates import QUALITY_GATE_ENV_VARS
 from security import SENSITIVE_DIRECTORIES, bash_security_hook
 
@@ -353,7 +353,7 @@ def create_client(
     print()
 
     # Use system Claude CLI instead of bundled one (avoids Bun runtime crash on Windows)
-    system_cli = shutil.which("claude")
+    system_cli = find_claude_cli()
     if system_cli:
         print(f"   - Using system CLI: {system_cli}")
     else:

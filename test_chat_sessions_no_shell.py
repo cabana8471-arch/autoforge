@@ -39,7 +39,7 @@ def _run_session(module, session_cls, project_dir: Path):
     _CapturingClient.captured = []
     with (
         patch.object(module, "ClaudeSDKClient", _CapturingClient),
-        patch.object(module.shutil, "which", return_value="/usr/bin/claude"),
+        patch.object(module, "find_claude_cli", return_value="/usr/bin/claude"),
         patch("registry.get_effective_sdk_env", return_value={}),
         patch("registry.get_effort_setting", return_value=None),
     ):

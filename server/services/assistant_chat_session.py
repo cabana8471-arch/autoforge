@@ -10,7 +10,6 @@ but cannot modify any files.
 import json
 import logging
 import os
-import shutil
 import sys
 import threading
 from datetime import datetime
@@ -28,6 +27,7 @@ from .assistant_database import (
 from .chat_constants import (
     ROOT_DIR,
     check_rate_limit_error,
+    find_claude_cli,
     format_client_init_error,
     remove_system_prompt_file,
     safe_receive_response,
@@ -292,7 +292,7 @@ class AssistantChatSession:
         self._system_prompt_file = write_system_prompt_file(self.project_dir, "assistant", system_prompt)
 
         # Use system Claude CLI
-        system_cli = shutil.which("claude")
+        system_cli = find_claude_cli()
 
         # Build environment overrides for API configuration
         from registry import DEFAULT_MODEL, get_effective_sdk_env, get_effort_setting
