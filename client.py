@@ -247,6 +247,7 @@ CODING_AGENT_TOOLS = [
     "mcp__features__feature_mark_passing",
     "mcp__features__feature_mark_failing",
     "mcp__features__feature_skip",
+    "mcp__features__feature_split",
     "mcp__features__feature_clear_in_progress",
     "mcp__features__feature_verify_quality",
     "mcp__features__feature_report_failure",
