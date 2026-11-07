@@ -155,3 +155,21 @@ def test_feature_create_bulk_returns_feature_ids(tmp_path, monkeypatch):
 
     assert result["created"] == 2
     assert [names[i] for i in result["feature_ids"]] == ["Dark theme toggle", "Theme persists"]
+
+
+def test_parse_bulk_wrapped_in_fastmcp_result():
+    # FastMCP wraps a tool's string return value as {"result": "<json>"}
+    # (seen in a real expand session: server log line for feature_create_bulk)
+    inner = json.dumps({"created": 2, "with_dependencies": 0, "feature_ids": [2, 3]})
+    result = _text_content({"result": inner})
+    assert parse_created_features(BULK, BULK_INPUT, result) == [
+        {"id": 2, "name": "Dark theme toggle", "category": "style"},
+        {"id": 3, "name": "Theme persists", "category": "functional"},
+    ]
+
+
+def test_parse_single_wrapped_in_fastmcp_result():
+    inner = json.dumps({"success": True, "feature": {"id": 4, "name": "Export CSV", "category": "data"}})
+    assert parse_created_features(SINGLE, {}, _text_content({"result": inner})) == [
+        {"id": 4, "name": "Export CSV", "category": "data"},
+    ]
