@@ -48,7 +48,7 @@ def _poll_procs(
     """
     def _alive(p: psutil.Process) -> bool:
         try:
-            return p.is_running() and p.status() != psutil.STATUS_ZOMBIE
+            return bool(p.is_running() and p.status() != psutil.STATUS_ZOMBIE)
         except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
             return False
 
@@ -74,7 +74,8 @@ def wait_procs_safe(
     used to propagate up and crash the server. Fall back to polling instead.
     """
     try:
-        return psutil.wait_procs(procs, timeout=timeout)
+        gone, alive = psutil.wait_procs(procs, timeout=timeout)
+        return list(gone), list(alive)
     except OSError as e:
         if e.errno != errno.EINVAL:
             raise
