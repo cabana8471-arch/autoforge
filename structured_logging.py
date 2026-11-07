@@ -28,6 +28,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -99,15 +100,37 @@ class StructuredLogEntry:
         return json.dumps(self.to_dict())
 
 
+_INIT_LOCK_RETRIES = 10
+
+
 def _init_log_database(db_path: Path) -> None:
-    """Create the logs table and indexes if they do not exist."""
+    """Create the logs table and indexes, retrying while another process initializes them.
+
+    Several agents can open a fresh logs.db at once. Switching to WAL needs an
+    exclusive lock, and SQLite reports "database is locked" immediately instead
+    of waiting, so a short retry loop is needed.
+    """
+    for attempt in range(_INIT_LOCK_RETRIES):
+        try:
+            _create_log_schema(db_path)
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or attempt == _INIT_LOCK_RETRIES - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
+def _create_log_schema(db_path: Path) -> None:
+    """Enable WAL (if not already on) and create the logs table and indexes."""
     # Use context manager to ensure connection is closed on errors
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
 
         # Enable WAL mode for better concurrency with parallel agents
-        # WAL allows readers and writers to work concurrently without blocking
-        cursor.execute("PRAGMA journal_mode=WAL")
+        # WAL allows readers and writers to work concurrently without blocking.
+        # The mode is persistent, so only switch when the file is not WAL yet.
+        if cursor.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+            cursor.execute("PRAGMA journal_mode=WAL")
 
         # Create logs table
         cursor.execute("""

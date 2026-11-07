@@ -13,8 +13,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest import TestCase
+from unittest import TestCase, mock
 
+import structured_logging
 from structured_logging import (
     StructuredLogEntry,
     StructuredLogHandler,
@@ -486,3 +487,42 @@ class TestCleanup(TestCase):
 if __name__ == "__main__":
     import unittest
     unittest.main()
+
+
+class TestLogDatabaseInit(TestCase):
+    """Tests for logs.db initialization under contention."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.db_path = Path(self.temp_dir) / "logs.db"
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_retries_while_database_is_locked(self):
+        """A transient 'database is locked' during init is retried, not raised."""
+        real_create = structured_logging._create_log_schema
+        calls = {"n": 0}
+
+        def flaky_create(db_path):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise sqlite3.OperationalError("database is locked")
+            real_create(db_path)
+
+        with mock.patch.object(structured_logging, "_create_log_schema", flaky_create), \
+                mock.patch.object(structured_logging.time, "sleep"):
+            structured_logging._init_log_database(self.db_path)
+
+        self.assertEqual(calls["n"], 3)
+        with sqlite3.connect(self.db_path) as conn:
+            self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+
+    def test_other_operational_errors_are_raised(self):
+        """Errors other than locking propagate immediately."""
+        with mock.patch.object(
+            structured_logging, "_create_log_schema",
+            side_effect=sqlite3.OperationalError("disk I/O error"),
+        ):
+            with self.assertRaises(sqlite3.OperationalError):
+                structured_logging._init_log_database(self.db_path)
