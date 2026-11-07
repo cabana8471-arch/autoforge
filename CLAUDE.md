@@ -506,7 +506,9 @@ Agents can implement multiple features per session using `--batch-size` (1-15, d
 
 ### Design System
 
-The UI uses a **neobrutalism** design with Tailwind CSS v4:
-- CSS variables defined in `ui/src/styles/globals.css` via `@theme` directive
-- Custom animations: `animate-slide-in`, `animate-pulse-neo`, `animate-shimmer`
-- Color tokens: `--color-neo-pending` (yellow), `--color-neo-progress` (cyan), `--color-neo-done` (green)
+The UI uses **shadcn/ui** components on Tailwind CSS v4 with switchable themes:
+- Build UI from the primitives in `ui/src/components/ui/` (Dialog, Card, Button, Badge, Input, Alert, ...) and semantic classes (`text-primary`, `text-muted-foreground`, `bg-muted`, `text-destructive`)
+- Themes live in `ui/src/styles/globals.css`: `:root`/`.dark` (default "twitter") plus `.theme-claude`, `.theme-neo-brutalism`, `.theme-retro-arcade`, `.theme-aurora`, `.theme-business`, each with a `.dark` variant; the theme list is in `ui/src/hooks/useTheme.ts`
+- Extra tokens: `--color-log-*` (error/warning/info/debug/success) and `--color-status-*` (pending/progress/done)
+- Custom animations include `animate-slide-in`, `animate-shimmer`, `animate-thinking`, `animate-working`, `animate-celebrate`
+- The old `neo-*` utility classes (`neo-modal`, `neo-btn`, `--color-neo-*`) no longer exist; code using them renders unstyled
