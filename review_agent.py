@@ -33,7 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from api.safe_project_io import read_project_text, write_project_file
+from api.safe_project_io import UnsafeProjectPathError, read_project_text, write_project_file
 from autoforge_paths import get_review_reports_dir
 
 logger = logging.getLogger(__name__)
@@ -116,6 +116,9 @@ class ReviewReport:
     files_reviewed: list[str] = field(default_factory=list)
     issues: list[ReviewIssue] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
+    # Files not reviewed because they are reachable only through a symlink or hard
+    # link (they could point outside the project): reported, never silently clean
+    skipped_files: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -124,9 +127,11 @@ class ReviewReport:
             "review_time": self.review_time,
             "commits_reviewed": self.commits_reviewed,
             "files_reviewed": self.files_reviewed,
+            "skipped_files": self.skipped_files,
             "issues": [i.to_dict() for i in self.issues],
             "summary": {
                 "total_issues": len(self.issues),
+                "skipped_files": len(self.skipped_files),
                 "by_severity": {
                     s.value: len([i for i in self.issues if i.severity == s])
                     for s in IssueSeverity
@@ -193,13 +198,21 @@ class ReviewAgent:
             files_to_review = list(self._iter_source_files())
 
         # Run checks
+        skipped: list[Path] = []
         for file_path in files_to_review:
             if not file_path.exists():
                 continue
 
             try:
                 content = read_project_text(self.project_dir, file_path, errors="ignore")
-
+            except UnsafeProjectPathError as e:
+                logger.warning(f"Not reviewing {file_path}: {e}")
+                skipped.append(file_path)
+                continue
+            except Exception as e:
+                logger.warning(f"Error reviewing {file_path}: {e}")
+                continue
+            try:
                 if file_path.suffix == ".py":
                     self._review_python_file(file_path, content)
                 elif file_path.suffix in {".js", ".ts", ".jsx", ".tsx"}:
@@ -212,8 +225,11 @@ class ReviewAgent:
             project_dir=str(self.project_dir),
             review_time=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             commits_reviewed=commits or [],
-            files_reviewed=[str(f.relative_to(self.project_dir)) for f in files_to_review if f.exists()],
+            files_reviewed=[
+                str(f.relative_to(self.project_dir)) for f in files_to_review if f.exists() and f not in skipped
+            ],
             issues=self.issues,
+            skipped_files=[str(f.relative_to(self.project_dir)) for f in skipped],
         )
 
     def _iter_source_files(self):
