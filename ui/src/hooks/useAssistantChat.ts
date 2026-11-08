@@ -282,6 +282,8 @@ export function useAssistantChat({
 
           case "conversation_created": {
             setConversationId(data.conversation_id);
+            // The history list is cached for 30 s; show the new conversation now
+            queryClient.invalidateQueries({ queryKey: ["conversations", projectName] });
             break;
           }
 
@@ -305,6 +307,8 @@ export function useAssistantChat({
             }
 
             setIsLoading(false);
+            // A finished turn changes the conversation's title, count and order
+            queryClient.invalidateQueries({ queryKey: ["conversations", projectName] });
 
             // Mark current message as done streaming
             setMessages((prev) => {
@@ -360,13 +364,15 @@ export function useAssistantChat({
         checkAndSendTimeoutRef.current = null;
       }
 
+      // Keep the input disabled until the server answers this start: a message sent
+      // before it would go to the previous session (e.g. right after "New chat").
+      setIsLoading(true);
       connect();
 
-      // Wait for connection then send start message
+      // Send the start message as soon as the connection is open
       const checkAndSend = () => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           checkAndSendTimeoutRef.current = null;
-          setIsLoading(true);
           const payload: { type: string; conversation_id?: number } = {
             type: "start",
           };
@@ -385,10 +391,11 @@ export function useAssistantChat({
           checkAndSendTimeoutRef.current = window.setTimeout(checkAndSend, 100);
         } else {
           checkAndSendTimeoutRef.current = null;
+          setIsLoading(false);
         }
       };
 
-      checkAndSendTimeoutRef.current = window.setTimeout(checkAndSend, 100);
+      checkAndSend();
     },
     [connect],
   );

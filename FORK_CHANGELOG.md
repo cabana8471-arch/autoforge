@@ -69,6 +69,8 @@ a few small pieces were ported from #307, #317, #318, #322 and #255.
   (bypass mode plus bare `Read`); they now read only inside the project. Agents can no longer
   mark Backlog or Manual Testing features passing; a second assistant tab no longer orphans the
   approval prompt; the allowlist editor refuses blank command names
+- Fixed: a message sent right after "New chat" went to the previous conversation, and the history
+  list showed a new conversation only after 30 s; the test suite no longer touches `~/.autoforge`
 
 ## [2025-01-25] Infrastructure Features & Mock Data Prevention
 
