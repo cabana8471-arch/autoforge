@@ -25,6 +25,7 @@ export function Modals() {
     showAddFeature, setShowAddFeature,
     showExpandProject, setShowExpandProject,
     showSpecChat, setShowSpecChat,
+    showOnboardChat, setShowOnboardChat,
     showKeyboardHelp, setShowKeyboardHelp,
     showResetModal, setShowResetModal,
     assistantOpen, setAssistantOpen,
@@ -71,6 +72,22 @@ export function Modals() {
         />
       )}
 
+      {/* Onboard Existing Project - analyzes the codebase, writes the spec, records features */}
+      {showOnboardChat && selectedProject && (
+        <ExpandProjectModal
+          isOpen={showOnboardChat}
+          projectName={selectedProject}
+          mode="onboard"
+          onClose={() => {
+            setShowOnboardChat(false)
+            // The spec may have been written, so refresh hasSpec as well as features
+            queryClient.invalidateQueries({ queryKey: ['projects'] })
+            queryClient.invalidateQueries({ queryKey: ['features', selectedProject] })
+          }}
+          onFeaturesAdded={() => {}}
+        />
+      )}
+
       {/* Spec Creation Chat - full screen overlay */}
       {showSpecChat && selectedProject && (
         <div className="fixed inset-0 z-50 bg-background">
@@ -105,7 +122,7 @@ export function Modals() {
       )}
 
       {/* Assistant FAB and Panel - hide when expand modal or spec creation is open */}
-      {selectedProject && !showExpandProject && !isSpecCreating && !showSpecChat && (
+      {selectedProject && !showExpandProject && !isSpecCreating && !showSpecChat && !showOnboardChat && (
         <>
           <AssistantFAB
             onClick={() => setAssistantOpen(!assistantOpen)}

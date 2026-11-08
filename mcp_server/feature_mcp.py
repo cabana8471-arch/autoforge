@@ -55,6 +55,7 @@ from api.dependency_resolver import (
 )
 from api.migration import migrate_json_to_sqlite
 from api.test_evidence import build_test_evidence, prune_evidence_dir
+from env_constants import ONBOARD_SESSION_ENV
 from quality_gates import load_config as load_quality_config
 from quality_gates import run_quality_checks
 
@@ -1013,10 +1014,11 @@ def feature_create_bulk(
     """Create multiple features in a single operation.
 
     Features are assigned sequential priorities based on their order.
-    All features start with passes=false.
+    Features start with passes=false unless "passes": true is given.
 
     This is typically used by the initializer agent to set up the initial
-    feature list from the app specification.
+    feature list from the app specification, and by the onboarding assistant
+    to record functionality that already exists in an imported codebase.
 
     Args:
         features: List of features to create, each with:
@@ -1028,6 +1030,9 @@ def feature_create_bulk(
               features in THIS batch that this feature depends on. Use this instead
               of 'dependencies' since IDs aren't known until after creation.
               Example: [0, 2] means this feature depends on features at index 0 and 2.
+            - passes (bool, optional): Set to true ONLY for functionality that is
+              already implemented in the existing codebase. Accepted only in the
+              project onboarding session; elsewhere it is an error. Defaults to false.
 
     Returns:
         JSON with: created (int) - number of features created, with_dependencies (int),
@@ -1048,6 +1053,18 @@ def feature_create_bulk(
                 if not all(key in feature_data for key in ["category", "name", "description", "steps"]):
                     return json.dumps({
                         "error": f"Feature at index {i} missing required fields (category, name, description, steps)"
+                    })
+
+                if not isinstance(feature_data.get("passes", False), bool):
+                    return json.dumps({
+                        "error": f"Feature at index {i} has invalid 'passes' value (must be true or false)"
+                    })
+                # User decision 1A: only the onboarding session may record existing
+                # functionality as passing; every other caller creates pending features
+                if feature_data.get("passes") and os.environ.get(ONBOARD_SESSION_ENV) != "1":
+                    return json.dumps({
+                        "error": f"Feature at index {i}: 'passes': true is only allowed during project "
+                                 "onboarding. Create the feature without 'passes'."
                     })
 
                 # Validate depends_on_indices
@@ -1083,7 +1100,7 @@ def feature_create_bulk(
                     name=feature_data["name"],
                     description=feature_data["description"],
                     steps=feature_data["steps"],
-                    passes=False,
+                    passes=feature_data.get("passes", False),
                     in_progress=False,
                 )
                 session.add(db_feature)

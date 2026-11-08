@@ -19,6 +19,11 @@ import shutil
 import sys
 from pathlib import Path
 
+# Set by the onboarding chat session on its feature MCP server only: lets
+# feature_create_bulk record existing functionality with "passes": true.
+# Projects cannot set it (it comes from the AutoForge process, not the project).
+ONBOARD_SESSION_ENV = "AUTOFORGE_ONBOARD_SESSION"
+
 API_ENV_VARS: list[str] = [
     # Core API configuration
     "ANTHROPIC_BASE_URL",              # Custom API endpoint (e.g., https://api.z.ai/api/anthropic)

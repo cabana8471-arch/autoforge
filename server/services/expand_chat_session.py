@@ -4,6 +4,10 @@ Expand Chat Session
 
 Manages interactive project expansion conversation with Claude.
 Uses the expand-project.md skill to help users add features to existing projects.
+
+In "onboard" mode it uses the onboard-project.md skill instead: Claude explores an
+existing codebase that AutoForge has no spec for yet, writes app_spec.txt describing
+it, records the existing functionality as passing features, and then plans new ones.
 """
 
 import asyncio
@@ -15,15 +19,17 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Literal, Optional
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+from claude_agent_sdk.types import HookMatcher
 from dotenv import load_dotenv
 
 from ..schemas import FileAttachment
 from ..utils.document_extraction import DocumentExtractionError
 from .chat_constants import (
     NO_SHELL_PROMPT_NOTE,
+    ONBOARD_SESSION_ENV,
     ROOT_DIR,
     build_attachment_content_blocks,
     check_rate_limit_error,
@@ -149,6 +155,70 @@ something up, fetch it and use what you learn to write better features. You cann
 or run commands; implementation is done later by the coding agent.
 """
 
+# Onboard mode: same tools, plus writing the app spec (enforced by make_spec_only_write_hook)
+ONBOARD_TOOLS_PROMPT = """
+
+## Tools Available In This Session
+
+- **Read / Glob / Grep**: Explore the existing codebase (read-only)
+- **Write / Edit**: ONLY for `.autoforge/prompts/app_spec.txt`; every other write is blocked
+- **WebFetch / WebSearch**: Look up references the user points you to
+- **feature_create_bulk / feature_create / feature_get_stats**: Record existing features
+  (`"passes": true` is accepted in this session only) and add new pending ones
+
+You cannot run commands or change source code; implementation is done later by the coding agent.
+"""
+
+ExpandMode = Literal["expand", "onboard"]
+EXPAND_MODES: tuple[ExpandMode, ...] = ("expand", "onboard")
+
+SKILL_FILES: dict[ExpandMode, str] = {
+    "expand": "expand-project.md",
+    "onboard": "onboard-project.md",
+}
+
+# File-modifying tools. Expand mode denies them outright; onboard mode allows
+# Write/Edit but only for app_spec.txt (enforced by a PreToolUse hook).
+FILE_WRITE_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"]
+
+# Marker present in the unmodified app_spec template scaffolded for new projects
+SPEC_TEMPLATE_MARKER = "YOUR_PROJECT_NAME"
+
+
+def make_spec_only_write_hook(spec_path: Path):
+    """
+    Build a PreToolUse hook that blocks file writes to anything but spec_path.
+
+    Onboarding needs to write app_spec.txt but must never touch the user's
+    existing source code, so every write/edit outside that one file is blocked.
+
+    ``spec_path`` must be absolute and free of symlinks (built from the resolved
+    project directory). Each write is resolved when it happens, so a symlink
+    planted at the spec path later points elsewhere and is blocked too.
+    """
+    allowed = spec_path
+
+    async def spec_only_write_hook(input_data, tool_use_id=None, context=None):
+        if input_data.get("tool_name") not in FILE_WRITE_TOOLS:
+            return {}
+        tool_input = input_data.get("tool_input", {}) or {}
+        raw_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+        try:
+            target = Path(raw_path)
+            if not target.is_absolute():
+                target = allowed.parent / target
+            if raw_path and target.resolve() == allowed:
+                return {}
+        except (OSError, ValueError):
+            pass
+        return {
+            "decision": "block",
+            "reason": f"Onboarding may only write the app specification at {allowed}. "
+                      "Existing source code must not be modified.",
+        }
+
+    return spec_only_write_hook
+
 
 class ExpandChatSession:
     """
@@ -158,18 +228,25 @@ class ExpandChatSession:
     1. Reads existing app_spec.txt for context
     2. Chats with the user to define new features
     3. Claude creates features via the feature_create_bulk MCP tool
+
+    In onboard mode there is no spec yet: Claude reads the codebase instead,
+    writes app_spec.txt (the only file it may write), and records existing
+    functionality as passing features before planning new ones.
     """
 
-    def __init__(self, project_name: str, project_dir: Path):
+    def __init__(self, project_name: str, project_dir: Path, mode: ExpandMode = "expand"):
         """
         Initialize the session.
 
         Args:
             project_name: Name of the project being expanded
             project_dir: Absolute path to the project directory
+            mode: "expand" to add features to a specced project, "onboard" to
+                analyze an existing codebase that has no spec yet
         """
         self.project_name = project_name
         self.project_dir = project_dir
+        self.mode: ExpandMode = mode
         self.client: Optional[ClaudeSDKClient] = None
         self.messages: list[dict] = []
         self.complete: bool = False
@@ -209,20 +286,40 @@ class ExpandChatSession:
 
         Yields message chunks as they stream in.
         """
-        # Load the expand-project skill
-        skill_path = ROOT_DIR / ".claude" / "commands" / "expand-project.md"
+        is_onboard = self.mode == "onboard"
+
+        # Load the skill for this mode
+        skill_path = ROOT_DIR / ".claude" / "commands" / SKILL_FILES[self.mode]
 
         if not skill_path.exists():
             yield {
                 "type": "error",
-                "content": f"Expand project skill not found at {skill_path}"
+                "content": f"{'Onboard' if is_onboard else 'Expand'} project skill not found at {skill_path}"
             }
             return
 
-        # Verify project has existing spec
         from autoforge_paths import get_prompts_dir
-        spec_path = get_prompts_dir(self.project_dir) / "app_spec.txt"
-        if not spec_path.exists():
+        spec_path = get_prompts_dir(self.project_dir.resolve()) / "app_spec.txt"
+        if is_onboard:
+            spec_path.parent.mkdir(parents=True, exist_ok=True)
+            if spec_path.resolve() != spec_path:
+                # Onboarding writes this file; never through a symlink out of the project
+                yield {
+                    "type": "error",
+                    "content": f"Cannot onboard: {spec_path} goes through a symlink.",
+                }
+                return
+            # Remove the unmodified scaffold template so Claude can write the spec
+            # fresh (the SDK requires reading an existing file before overwriting it)
+            if spec_path.exists():
+                try:
+                    if SPEC_TEMPLATE_MARKER in spec_path.read_text(encoding="utf-8", errors="replace"):
+                        spec_path.unlink()
+                        logger.info("Deleted scaffolded app_spec.txt template for onboarding")
+                except OSError as e:
+                    logger.warning(f"Could not inspect app_spec.txt template: {e}")
+        elif not spec_path.exists():
+            # Expand mode builds on the existing spec
             yield {
                 "type": "error",
                 "content": "Project has no app_spec.txt. Please create it first using spec creation."
@@ -246,11 +343,16 @@ class ExpandChatSession:
             }
             return
 
+        # Onboard mode may write app_spec.txt (and nothing else, see hook below)
+        write_tools = ["Write", "Edit"] if is_onboard else []
+        denied_tools = [t for t in FILE_WRITE_TOOLS if t not in write_tools] + ["Bash"]
+
         # Create temporary security settings file (unique per session to avoid conflicts)
         # Note: permission_mode="bypassPermissions" is safe here because:
-        # 1. Write/Edit/Bash are removed via disallowed_tools and the "deny" list below
-        # 2. MCP tools are restricted to feature creation only
-        # 3. No Bash access - cannot execute arbitrary commands
+        # 1. Bash (and in expand mode Write/Edit) is removed via disallowed_tools and the "deny" list
+        # 2. In onboard mode a PreToolUse hook blocks writes to anything but app_spec.txt
+        # 3. MCP tools are restricted to feature creation only
+        # 4. No Bash access - cannot execute arbitrary commands
         security_settings = {
             "sandbox": {"enabled": True},
             "permissions": {
@@ -263,7 +365,7 @@ class ExpandChatSession:
                     "WebSearch",
                     *EXPAND_FEATURE_TOOLS,
                 ],
-                "deny": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"],
+                "deny": denied_tools,
             },
         }
         from autoforge_paths import get_expand_settings_path
@@ -275,7 +377,8 @@ class ExpandChatSession:
 
         # Replace $ARGUMENTS with absolute project path
         project_path = str(self.project_dir.resolve())
-        system_prompt = skill_content.replace("$ARGUMENTS", project_path) + EXPAND_TOOLS_PROMPT + NO_SHELL_PROMPT_NOTE
+        tools_prompt = ONBOARD_TOOLS_PROMPT if is_onboard else EXPAND_TOOLS_PROMPT
+        system_prompt = skill_content.replace("$ARGUMENTS", project_path) + tools_prompt + NO_SHELL_PROMPT_NOTE
 
         # Pass the system prompt via a file (--system-prompt-file) rather than inline
         # to avoid the Windows command line length limit (~8191 chars)
@@ -297,6 +400,9 @@ class ExpandChatSession:
                 "env": {
                     "PROJECT_DIR": str(self.project_dir.resolve()),
                     "PYTHONPATH": str(ROOT_DIR.resolve()),
+                    # Lets feature_create_bulk accept "passes": true (user decision 1A:
+                    # existing functionality may be recorded as passing only here)
+                    **({ONBOARD_SESSION_ENV: "1"} if is_onboard else {}),
                 },
             },
         }
@@ -309,9 +415,17 @@ class ExpandChatSession:
                     effort=effort,  # type: ignore[arg-type, unused-ignore]  # older SDK Literal omits "xhigh"
                     cli_path=system_cli,
                     system_prompt={"type": "file", "path": str(self._system_prompt_file)},
-                    allowed_tools=[*EXPAND_BUILTIN_TOOLS, *EXPAND_FEATURE_TOOLS],
-                    disallowed_tools=["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"],
+                    allowed_tools=[*EXPAND_BUILTIN_TOOLS, *write_tools, *EXPAND_FEATURE_TOOLS],
+                    disallowed_tools=denied_tools,
                     mcp_servers=mcp_servers,  # type: ignore[arg-type]  # SDK accepts dict config at runtime
+                    hooks={
+                        "PreToolUse": [
+                            HookMatcher(
+                                matcher="|".join(FILE_WRITE_TOOLS),
+                                hooks=[make_spec_only_write_hook(spec_path)],
+                            ),
+                        ],
+                    } if is_onboard else None,
                     permission_mode="bypassPermissions",
                     max_turns=100,
                     cwd=str(self.project_dir.resolve()),
@@ -332,7 +446,8 @@ class ExpandChatSession:
         # Start the conversation
         try:
             async with self._query_lock:
-                async for chunk in self._query_claude("Begin the project expansion process."):
+                opening = "Begin the project onboarding process." if is_onboard else "Begin the project expansion process."
+                async for chunk in self._query_claude(opening):
                     yield chunk
             yield {"type": "response_done"}
         except Exception:
@@ -506,13 +621,15 @@ def get_expand_session(project_name: str) -> Optional[ExpandChatSession]:
         return _expand_sessions.get(project_name)
 
 
-async def create_expand_session(project_name: str, project_dir: Path) -> ExpandChatSession:
+async def create_expand_session(
+    project_name: str, project_dir: Path, mode: ExpandMode = "expand"
+) -> ExpandChatSession:
     """Create a new expansion session for a project, closing any existing one."""
     old_session: Optional[ExpandChatSession] = None
 
     with _expand_sessions_lock:
         old_session = _expand_sessions.pop(project_name, None)
-        session = ExpandChatSession(project_name, project_dir)
+        session = ExpandChatSession(project_name, project_dir, mode)
         _expand_sessions[project_name] = session
 
     if old_session:

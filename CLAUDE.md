@@ -138,6 +138,7 @@ python -m pytest test_spec_conversation_summary.py  # Spec chat transcript (spec
 python -m pytest test_test_evidence.py         # Test evidence: screenshot copies, symlink safety, pruning, endpoint
 python -m pytest test_project_import.py        # Re-register an AutoForge folder (API, wizard detection, CLI option 4)
 python -m pytest test_safe_project_io.py       # No-follow project I/O used outside the agent sandbox
+python -m pytest test_onboard_project.py       # Onboarding: spec-only write hook, passes=true only in the onboard session
 ```
 
 ### React UI
@@ -217,7 +218,7 @@ The FastAPI server provides REST and WebSocket endpoints for the UI:
 - `agent.py` - Agent control (start/stop/pause/resume)
 - `filesystem.py` - Filesystem browser API with security controls
 - `spec_creation.py` - WebSocket for interactive spec creation
-- `expand_project.py` - Interactive project expansion via natural language
+- `expand_project.py` - Interactive project expansion via natural language (`?mode=onboard` analyzes an existing codebase that has no spec yet)
 - `assistant_chat.py` - Read-only project assistant chat (WebSocket/REST)
 - `terminal.py` - Interactive terminal I/O with PTY support (WebSocket bidirectional)
 - `devserver.py` - Dev server control (start/stop) and config
@@ -482,6 +483,7 @@ Alternative providers are configured via the **Settings UI** (gear icon > API Pr
 **Slash commands** (`.claude/commands/`):
 - `/create-spec` - Interactive spec creation for new projects
 - `/expand-project` - Expand existing project with new features
+- `/onboard-project` - Onboard an existing codebase: analyze it, write the spec, record existing features as passing, plan new ones (the UI runs it as the import wizard's **Analyze with AI** step; `feature_create_bulk` accepts `"passes": true` only in that session, via `AUTOFORGE_ONBOARD_SESSION` on its feature MCP server)
 - `/gsd-to-autoforge-spec` - Convert GSD codebase mapping to app_spec.txt
 - `/check-code` - Run lint and type-check for code quality
 - `/checkpoint` - Create comprehensive checkpoint commit

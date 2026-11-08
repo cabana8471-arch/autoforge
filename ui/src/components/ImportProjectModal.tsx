@@ -27,9 +27,12 @@ import {
   Square,
   ChevronDown,
   ChevronRight,
+  Sparkles,
 } from 'lucide-react'
 import { useImportProject } from '../hooks/useImportProject'
 import { useCreateProject, useReregisterProject } from '../hooks/useProjects'
+import { useAppContext } from '../contexts/AppContext'
+import { useQueryClient } from '@tanstack/react-query'
 import { FolderBrowser } from './FolderBrowser'
 import {
   Dialog,
@@ -64,8 +67,12 @@ export function ImportProjectModal({
   const [projectName, setProjectName] = useState('')
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [registerError, setRegisterError] = useState<string | null>(null)
-  // Re-register an existing AutoForge folder as is (no feature extraction, nothing scaffolded)
-  const [reregister, setReregister] = useState(false)
+  // How the register step finishes:
+  // - extract: register, then create the features extracted from the code
+  // - reregister: existing AutoForge folder kept as is (no extraction, nothing scaffolded)
+  // - analyze: register a plain codebase, then Claude analyzes it in the onboarding chat
+  const [registerMode, setRegisterMode] = useState<'extract' | 'reregister' | 'analyze'>('extract')
+  const reregister = registerMode === 'reregister'
   const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Track if modal is active to prevent stale state updates after close/unmount
@@ -84,6 +91,8 @@ export function ImportProjectModal({
 
   const createProject = useCreateProject()
   const reregisterProject = useReregisterProject()
+  const { setShowOnboardChat } = useAppContext()
+  const queryClient = useQueryClient()
 
   // Set active on mount/open, inactive on close/unmount
   useEffect(() => {
@@ -104,7 +113,7 @@ export function ImportProjectModal({
     setProjectName('')
     setExpandedCategories(new Set())
     setRegisterError(null)
-    setReregister(false)
+    setRegisterMode('extract')
     reset()
     onClose()
   }, [onClose, reset])
@@ -152,8 +161,8 @@ export function ImportProjectModal({
     }
   }
 
-  const handleContinueToRegister = (asIs = false) => {
-    setReregister(asIs)
+  const handleContinueToRegister = (mode: 'extract' | 'reregister' | 'analyze') => {
+    setRegisterMode(mode)
     // Generate default project name from path
     const pathParts = state.projectPath?.split(/[/\\]/) || []
     const defaultName = pathParts[pathParts.length - 1] || 'imported-project'
@@ -197,6 +206,17 @@ export function ImportProjectModal({
       // Check if still active after async operation
       if (!isActiveRef.current) return
 
+      if (registerMode === 'analyze') {
+        // AI analysis: the onboarding chat writes the spec and records what the code already does.
+        // Wait for the project list first, or selecting the new project clears it as unknown.
+        await queryClient.invalidateQueries({ queryKey: ['projects'] })
+        if (!isActiveRef.current) return
+        onProjectImported(trimmedName)
+        setShowOnboardChat(true)
+        handleClose()
+        return
+      }
+
       // Then create features
       const success = await createFeatures(trimmedName)
 
@@ -224,8 +244,8 @@ export function ImportProjectModal({
     } else if (step === 'features') {
       setStep('detected')
     } else if (step === 'register') {
-      setStep(reregister ? 'detected' : 'features')
-      setReregister(false)
+      setStep(registerMode === 'extract' ? 'features' : 'detected')
+      setRegisterMode('extract')
     }
   }
 
@@ -407,9 +427,20 @@ export function ImportProjectModal({
           </Button>
           <div className="flex gap-2">
           {result.is_autoforge_project && (
-            <Button onClick={() => handleContinueToRegister(true)} disabled={state.step === 'extracting'}>
+            <Button onClick={() => handleContinueToRegister('reregister')} disabled={state.step === 'extracting'}>
               Re-register as is
               <ArrowRight size={16} />
+            </Button>
+          )}
+          {!result.is_autoforge_project && (
+            <Button
+              variant="outline"
+              onClick={() => handleContinueToRegister('analyze')}
+              disabled={state.step === 'extracting'}
+              title="Claude reads the code, writes the spec with you and records existing features as done"
+            >
+              <Sparkles size={16} />
+              Analyze with AI
             </Button>
           )}
           <Button
@@ -551,7 +582,7 @@ export function ImportProjectModal({
             <ArrowLeft size={16} />
             Back
           </Button>
-          <Button onClick={() => handleContinueToRegister(false)} disabled={state.selectedFeatures.length === 0}>
+          <Button onClick={() => handleContinueToRegister('extract')} disabled={state.selectedFeatures.length === 0}>
             Continue
             <ArrowRight size={16} />
           </Button>
@@ -566,7 +597,7 @@ export function ImportProjectModal({
       'sm:max-w-lg',
       <>
         <DialogHeader>
-          <DialogTitle>{reregister ? 'Re-register Project' : 'Register Project'}</DialogTitle>
+          <DialogTitle>{reregister ? 'Re-register Project' : registerMode === 'analyze' ? 'Register and Analyze' : 'Register Project'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -590,6 +621,11 @@ export function ImportProjectModal({
             <CardContent className="p-4 text-sm space-y-1">
               {reregister ? (
                 <div className="text-muted-foreground">Existing spec, features and progress are kept as they are.</div>
+              ) : registerMode === 'analyze' ? (
+                <div className="text-muted-foreground">
+                  After registering, Claude analyzes the code, writes the spec with you and records what
+                  already works. It can only write the spec; your source code is not changed.
+                </div>
               ) : (
                 <div className="flex justify-between">
                   <span>Features to create:</span>
@@ -626,7 +662,7 @@ export function ImportProjectModal({
               </>
             ) : (
               <>
-                {reregister ? 'Re-register Project' : 'Import Project'}
+                {reregister ? 'Re-register Project' : registerMode === 'analyze' ? 'Register and Analyze' : 'Import Project'}
                 <CheckCircle2 size={16} />
               </>
             )}
