@@ -16,11 +16,16 @@ import threading
 from contextlib import aclosing
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from dotenv import load_dotenv
 
+from .assistant_agent_tools import (
+    AGENT_CONTROL_SERVER_NAME,
+    AGENT_CONTROL_TOOLS,
+    create_agent_control_server,
+)
 from .assistant_database import (
     add_message,
     create_conversation,
@@ -65,6 +70,9 @@ INTERACTIVE_TOOLS = [
 
 # Combined list for assistant
 ASSISTANT_FEATURE_TOOLS = READONLY_FEATURE_MCP_TOOLS + FEATURE_MANAGEMENT_TOOLS + INTERACTIVE_TOOLS
+
+# All MCP tools the assistant may use (feature management + agent control)
+ASSISTANT_MCP_TOOLS = ASSISTANT_FEATURE_TOOLS + AGENT_CONTROL_TOOLS
 
 # Read-only built-in tools (no Write, Edit, Bash)
 READONLY_BUILTIN_TOOLS = [
@@ -138,13 +146,17 @@ You typically help with one of three kinds of requests:
 - Skip features to deprioritize them (move to end of queue)
 - View feature statistics and progress
 
+**Agent Control:**
+- Check whether the coding agent is running, paused, stopped or crashed
+- Start, stop, pause and resume the coding agent when the user asks you to
+
 ## What You CANNOT Do
 
 - Modify, create, or delete source code files -- you have NO Write/Edit/Bash tools
 - Mark features as passing (that is the coding agent's job after real implementation)
 - Run bash commands or execute code
 
-**You must NEVER implement code yourself.** Even if the user pastes code, asks for a "quick fix", or insists -- do not attempt to write or edit files. Implementation is done exclusively by the coding agents. When the user wants code changed, create a feature for it with `feature_create` (or `feature_create_bulk`) describing the change. When the user reports a bug in something that already exists, use `feature_report_bug` on the affected feature. Then tell the user to start the coding agent to implement it.
+**You must NEVER implement code yourself.** Even if the user pastes code, asks for a "quick fix", or insists -- do not attempt to write or edit files. Implementation is done exclusively by the coding agents. When the user wants code changed, create a feature for it with `feature_create` (or `feature_create_bulk`) describing the change. When the user reports a bug in something that already exists, use `feature_report_bug` on the affected feature. Then offer to start the coding agent to implement it.
 
 ## Project Specification
 
@@ -168,6 +180,15 @@ You typically help with one of three kinds of requests:
 - **feature_create_bulk**: Create multiple features at once
 - **feature_report_bug**: Report a bug on an existing feature; it is reopened as pending so a coding agent fixes it
 - **feature_skip**: Move a feature to the end of the queue
+
+**Agent Control:**
+- **agent_get_status**: Check the coding agent's status (stopped, running, paused, pausing, paused_graceful, crashed)
+- **agent_start**: Start the coding agent with the global settings (optional: max_concurrency 1-5)
+- **agent_stop**: Stop the coding agent immediately
+- **agent_pause**: Gracefully pause the agent (it finishes current features first)
+- **agent_resume**: Resume a paused agent
+
+Only start, stop, pause or resume the agent when the user asks you to (or confirms when you offer). Check `agent_get_status` first when the current state matters, and report the result of the action back to the user.
 
 **Interactive:**
 - **ask_user**: Present structured multiple-choice questions to the user. Use this when you need to clarify requirements, offer design choices, or guide a decision. The user sees clickable option buttons and their selection is returned as your next message.
@@ -293,7 +314,7 @@ class AssistantChatSession:
             "Read(./**)",  # covers Glob and Grep (the CLI ignores Glob/Grep path rules)
             "WebFetch",
             "WebSearch",
-            *ASSISTANT_FEATURE_TOOLS,
+            *ASSISTANT_MCP_TOOLS,
         ]
 
         # Create security settings file
@@ -311,8 +332,8 @@ class AssistantChatSession:
         # Never through a link the agent planted in the project (raises when refused)
         write_project_file(self.project_dir, settings_file, json.dumps(security_settings, indent=2).encode("utf-8"))
 
-        # Build MCP servers config - only features MCP for read-only access
-        mcp_servers = {
+        # Build MCP servers config: features MCP (subprocess) + agent control (in-process)
+        mcp_servers: dict[str, Any] = {
             "features": {
                 "command": sys.executable,
                 "args": ["-m", "mcp_server.feature_mcp"],
@@ -324,6 +345,15 @@ class AssistantChatSession:
                 },
             },
         }
+        # Agent control is optional: if the in-process server can't be built
+        # (e.g. an incompatible mcp package), keep the assistant usable without it.
+        try:
+            mcp_servers[AGENT_CONTROL_SERVER_NAME] = create_agent_control_server(self.project_name)
+        except Exception as e:
+            logger.warning(
+                f"Agent control tools unavailable for {self.project_name}; "
+                f"continuing without them: {e}"
+            )
 
         # Get system prompt with project context
         system_prompt = get_system_prompt(self.project_name, self.project_dir)
@@ -355,9 +385,9 @@ class AssistantChatSession:
                     system_prompt={"type": "file", "path": str(self._system_prompt_file)},
                     # Load project settings/CLAUDE.md for codebase context
                     setting_sources=["project"],
-                    allowed_tools=[*READONLY_BUILTIN_TOOLS, *ASSISTANT_FEATURE_TOOLS],
+                    allowed_tools=[*READONLY_BUILTIN_TOOLS, *ASSISTANT_MCP_TOOLS],
                     disallowed_tools=DISALLOWED_ASSISTANT_TOOLS,
-                    mcp_servers=mcp_servers,  # type: ignore[arg-type]  # SDK accepts dict config at runtime
+                    mcp_servers=mcp_servers,
                     permission_mode="bypassPermissions",
                     max_turns=100,
                     cwd=str(self.project_dir.resolve()),
