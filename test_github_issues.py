@@ -216,11 +216,33 @@ def test_import_refuses_unconfirmed_external_author(client, monkeypatch):
 
 
 def test_import_accepts_confirmed_external_author(client, monkeypatch):
-    external = _issue(9, title="Run this script", association="CONTRIBUTOR")
+    external = _issue(9, title="Run this script", association="CONTRIBUTOR") | {"updated_at": "2026-11-01T10:00:00Z"}
     monkeypatch.setattr(gh, "get_issue", lambda repo, n, auth: external if n == 9 else _issue(n))
     resp = client.post(
         "/api/projects/demo/github/import",
-        json={"repo": "acme/app", "issue_numbers": [7, 9], "confirm_external_authors": [9]},
+        json={
+            "repo": "acme/app",
+            "issue_numbers": [7, 9],
+            "confirm_external_authors": [{"number": 9, "updated_at": "2026-11-01T10:00:00Z"}],
+        },
     )
     assert resp.status_code == 200, resp.text
     assert [f["name"] for f in resp.json()["features"]] == ["#7 Add dark mode", "#9 Run this script"]
+
+
+def test_import_refuses_external_issue_edited_after_confirmation(client, monkeypatch):
+    # The author edits the issue between the listing the user reviewed and the import
+    edited = _issue(9, title="Run this script", association="NONE") | {"updated_at": "2026-11-02T08:00:00Z"}
+    monkeypatch.setattr(gh, "get_issue", lambda repo, n, auth: edited)
+    resp = client.post(
+        "/api/projects/demo/github/import",
+        json={
+            "repo": "acme/app",
+            "issue_numbers": [9],
+            "confirm_external_authors": [{"number": 9, "updated_at": "2026-11-01T10:00:00Z"}],
+        },
+    )
+    assert resp.status_code == 409
+    assert "#9" in resp.json()["detail"]
+    listing = client.get("/api/projects/demo/github/issues").json()
+    assert all(i["imported_feature_id"] is None for i in listing["issues"])

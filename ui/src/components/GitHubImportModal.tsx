@@ -132,8 +132,11 @@ export function GitHubImportModal({ projectName, onClose }: GitHubImportModalPro
     setResult(null)
     try {
       const numbers = [...selected].slice(0, 50)
-      // Untrusted issues only enter the selection through the confirmation prompt
-      const external = issues.filter(i => !i.author_trusted && numbers.includes(i.number)).map(i => i.number)
+      // Untrusted issues only enter the selection through the confirmation prompt; the
+      // server refuses any of them edited on GitHub after this listing
+      const external = issues
+        .filter(i => !i.author_trusted && numbers.includes(i.number))
+        .map(i => ({ number: i.number, updated_at: i.updated_at }))
       const res = await importGitHubIssues(projectName, loadedRepo, numbers, includeComments, external)
       queryClient.invalidateQueries({ queryKey: ['features', projectName] })
       const imported = new Map(res.features.map(f => [Number(f.name.match(/^#(\d+)/)?.[1]), f.id]))
@@ -278,9 +281,11 @@ export function GitHubImportModal({ projectName, onClose }: GitHubImportModalPro
                         {confirming === issue.number && (
                           <div className="mt-2 rounded-md border border-destructive/50 p-2 text-sm space-y-2">
                             <p>
-                              {issue.author ? `@${issue.author}` : 'The author'} has no write access to this
-                              repository. Anyone can open an issue, and its text becomes instructions for the
-                              coding agent. Select it only if you have read it and trust it.
+                              {issue.author ? `@${issue.author}` : 'The author'} is not the owner, a
+                              collaborator or a member of this repository&apos;s organization. Anyone can open an
+                              issue, and its text becomes instructions for the coding agent. Select it only if you
+                              have read it on GitHub and trust it; if it is edited before you import, the import
+                              is refused.
                             </p>
                             <div className="flex gap-2">
                               <Button

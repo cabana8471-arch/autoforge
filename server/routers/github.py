@@ -51,15 +51,21 @@ class GitHubRepoResponse(BaseModel):
     authenticated: bool
 
 
+class ExternalAuthorConfirmation(BaseModel):
+    number: int
+    # updated_at from the listing the user reviewed; an issue edited since is refused
+    updated_at: str | None = None
+
+
 class GitHubImportRequest(BaseModel):
     repo: str
     issue_numbers: list[int] = Field(min_length=1, max_length=50)
     # Off by default (user decision 3A): anyone who can comment on an issue could add
     # text that becomes instructions for the coding agent
     include_comments: bool = False
-    # Issues by authors without write access to the repository (user decision 2A):
-    # their numbers must be listed here, or the import is refused
-    confirm_external_authors: list[int] = Field(default_factory=list, max_length=50)
+    # Issues by authors other than the owner, organization members and collaborators
+    # (user decision 2A) must be confirmed here, or the import is refused
+    confirm_external_authors: list[ExternalAuthorConfirmation] = Field(default_factory=list, max_length=50)
 
 
 class GitHubImportResponse(BaseModel):
@@ -161,16 +167,22 @@ async def import_issues(project_name: str, request: GitHubImportRequest):
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
     # Checked on the freshly fetched issue, not on what the UI listed earlier
-    unconfirmed = [
-        issue["number"]
-        for issue, _ in issues
-        if not issue["author_trusted"] and issue["number"] not in request.confirm_external_authors
-    ]
+    confirmed = {c.number: c.updated_at for c in request.confirm_external_authors}
+    external = [issue for issue, _ in issues if not issue["author_trusted"]]
+    unconfirmed = [i["number"] for i in external if i["number"] not in confirmed]
     if unconfirmed:
         listed = ", ".join(f"#{n}" for n in unconfirmed)
         raise HTTPException(
             status_code=400,
-            detail=f"Issues written by people without write access to the repository need confirmation: {listed}",
+            detail=f"Issues by authors outside the repository's owner, members and collaborators "
+            f"need confirmation: {listed}",
+        )
+    changed = [i["number"] for i in external if i["updated_at"] != confirmed[i["number"]]]
+    if changed:
+        listed = ", ".join(f"#{n}" for n in changed)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Issues changed on GitHub since you reviewed them: {listed}. Reload the list and review them again.",
         )
 
     already = _imported_issue_map(project_dir, [i for i, _ in issues])

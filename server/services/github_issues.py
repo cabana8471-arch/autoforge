@@ -49,8 +49,10 @@ MAX_DESCRIPTION_CHARS = 8000
 MAX_NAME_CHARS = 255
 MAX_CATEGORY_CHARS = 100
 
-# GitHub's author_association values for people with write access to the repository.
-# Anyone else can open an issue on a public repository, and the issue text becomes
+# GitHub's author_association values treated as trusted (user decision 2A): the
+# repository owner, members of its organization and collaborators. MEMBER does not
+# imply write access (an organization member may only read the repository). Anyone
+# else can open an issue on a public repository, and the issue text becomes
 # instructions for the coding agent, so their issues need an explicit confirmation.
 TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 DEFAULT_CATEGORY = "GitHub Issue"
