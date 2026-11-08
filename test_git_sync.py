@@ -146,10 +146,12 @@ def test_changed_remote_url_blocks_the_push(enabled: Path, remote: Path, tmp_pat
     assert _branches(evil) == "" and _branches(remote) == ""
 
 
-def test_stored_url_is_used_not_the_remote_push_url(enabled: Path, remote: Path, tmp_path: Path):
-    """A pushurl planted on the remote (get-url still shows the fetch URL) is ignored."""
+def test_stored_url_is_used_not_the_branch_upstream(enabled: Path, remote: Path, tmp_path: Path):
+    """With allowed keys pointing the branch at another remote, the push still goes to the stored URL."""
     evil = _bare(tmp_path, "evil.git")
-    _git(enabled, "remote", "set-url", "--push", "origin", str(evil))
+    _git(enabled, "remote", "add", "upstream", str(evil))
+    _git(enabled, "config", "branch.main.remote", "upstream")
+    _git(enabled, "config", "branch.main.merge", "refs/heads/main")
     head = _commit(enabled, "x.txt")
     ok, msg = git_sync.push_current_branch(enabled)
     assert ok, msg
@@ -180,6 +182,33 @@ def test_unsafe_local_config_blocks_the_push(enabled: Path, remote: Path, tmp_pa
     assert "refusing" in msg.lower() and key.split(".")[0] in msg.lower()
     assert _branches(remote) == "" and _branches(evil) == ""
     assert not marker.exists()
+
+
+def test_worktree_scoped_config_blocks_the_push(enabled: Path, remote: Path, tmp_path: Path):
+    """`git config --local` does not list .git/config.worktree; the check must see that scope too."""
+    _git(enabled, "config", "extensions.worktreeConfig", "true")
+    _git(enabled, "config", "--worktree", "core.sshCommand", f"touch {tmp_path / 'marker'}")
+    _commit(enabled, "x.txt")
+    ok, msg = git_sync.push_current_branch(enabled)
+    assert not ok
+    assert "core.sshcommand" in msg.lower()
+    assert _branches(remote) == ""
+
+
+@pytest.mark.parametrize("key,value", [
+    ("core.alternateRefsCommand", "touch /tmp/x"),
+    ("remote.origin.receivepack", "touch /tmp/x; git-receive-pack"),
+    ("push.recurseSubmodules", "on-demand"),
+    ("remote.origin.pushurl", "/somewhere/else.git"),
+])
+def test_any_key_outside_the_safe_set_blocks_the_push(enabled: Path, remote: Path, key: str, value: str):
+    """Only plain repository, identity, branch and remote url/fetch keys are accepted (allowlist)."""
+    _git(enabled, "config", key, value)
+    _commit(enabled, "x.txt")
+    ok, msg = git_sync.push_current_branch(enabled)
+    assert not ok
+    assert key.lower() in msg.lower()
+    assert _branches(remote) == ""
 
 
 def test_pre_push_hook_does_not_run(enabled: Path, remote: Path, tmp_path: Path):

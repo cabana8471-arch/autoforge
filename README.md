@@ -404,7 +404,7 @@ The agent commits its work to the project's local git repository after every fea
 Turning it on stores the URL the remote (`origin`) points to at that moment, and the page shows it. Every push goes explicitly to that stored URL; the current branch is pushed to the branch of the same name. Because the agent can run `git` commands in the project and the push runs outside its sandbox:
 
 - a push is refused when `git remote get-url origin` no longer matches the stored URL (turn auto-push off and on again to trust a new URL);
-- a push is refused when the project's `.git/config` sets keys that can redirect it or run a program (`url.*` insteadOf rewrites, `core.sshCommand`, `credential.*`, `include.*`, `http.*`, `gpg.*`, ...); keep such settings in your global git config;
+- a push is refused when the repository's own git config (`.git/config`, and `.git/config.worktree` if used) sets anything beyond plain repository flags, `user.*`, branch tracking and remote `url`/`fetch`: many keys can redirect a push or run a program (`url.*` insteadOf rewrites, `core.sshCommand`, `credential.*`, `remote.*.receivepack`, `include.*`, ...); keep other settings in your global git config;
 - git hooks never run for the push, it never force-pushes, never creates repositories or remotes, and runs non-interactively, so credentials must already work (`gh auth setup-git`, an SSH key, or a credential helper in your global config).
 
 Skipped or refused pushes are reported in the agent log with a `[GIT]` prefix and never stop the agent.

@@ -13,11 +13,13 @@ goes explicitly to that stored URL.
 The push runs in the orchestrator, outside the agent's sandbox, while the
 agent may run any ``git`` command in the project. So a push is refused when:
 - ``git remote get-url <remote>`` no longer equals the stored URL;
-- the repo-local config holds a key that can redirect the push, swap the
-  transport program or run one (``url.*`` insteadOf rewrites apply even to an
-  explicit URL, ``core.sshCommand``, ``credential.*``, ``include.*`` hiding
-  any of these in another file, ``http.*`` proxies and TLS settings,
-  ``gpg.*``, ...).
+- the repository's own config (local and worktree scopes) holds any key
+  outside a small safe set (core repository flags, identity, branch tracking,
+  remote url/fetch). Many keys can redirect a push or run a program
+  (``url.*`` insteadOf rewrites apply even to an explicit URL,
+  ``core.sshCommand``, ``credential.*``, ``remote.*.receivepack``,
+  ``include.*`` hiding keys in another file, ...), so an allowlist is used
+  rather than a list of known-bad keys.
 Hooks never run (``core.hooksPath=/dev/null`` and ``--no-verify``), it never
 force-pushes, never creates remotes, and runs non-interactively with a timeout.
 """
@@ -35,10 +37,18 @@ logger = logging.getLogger(__name__)
 GIT_PUSH_TARGETS_SETTING = "git_push_targets"
 PUSH_TIMEOUT_SECONDS = 60
 
-# Repo-local config keys that can redirect a push or run a program during it
-UNSAFE_LOCAL_CONFIG_PREFIXES = ("url.", "credential.", "include.", "includeif.", "http.", "gpg.")
-UNSAFE_LOCAL_CONFIG_KEYS = frozenset({
-    "core.sshcommand", "core.hookspath", "core.askpass", "core.fsmonitor", "core.gitproxy",
+# Repository-scoped config keys a push may run with; any other key refuses it.
+# Section and variable names are case-insensitive (git prints them lowercased).
+SAFE_REPO_CONFIG_KEYS = frozenset({
+    "core.repositoryformatversion", "core.filemode", "core.bare", "core.logallrefupdates",
+    "core.ignorecase", "core.precomposeunicode", "core.symlinks", "core.autocrlf", "core.eol",
+    "core.safecrlf", "user.name", "user.email", "commit.gpgsign", "tag.gpgsign", "init.defaultbranch",
+    "pull.rebase", "pull.ff", "extensions.objectformat",
+})
+# Keys with a subsection: (section, variable) allowed for any subsection
+SAFE_REPO_CONFIG_SUBSECTION_KEYS = frozenset({
+    ("branch", "remote"), ("branch", "merge"), ("branch", "rebase"),
+    ("remote", "url"), ("remote", "fetch"),
 })
 
 # Overrides that beat any repo-local value (command-line config wins)
@@ -103,16 +113,34 @@ def get_push_target(project_dir: Path) -> dict | None:
 
 
 def find_unsafe_local_config(project_dir: Path) -> list[str]:
-    """Repo-local config keys that could redirect a push or run a program."""
-    result = _git(project_dir, "config", "--local", "--name-only", "--list")
-    keys = {line.strip().lower() for line in result.stdout.splitlines() if line.strip()}
-    return sorted(k for k in keys if k in UNSAFE_LOCAL_CONFIG_KEYS or k.startswith(UNSAFE_LOCAL_CONFIG_PREFIXES))
+    """Repository-scoped config keys (local and worktree) outside the safe set.
+
+    ``git config --local`` would miss ``.git/config.worktree``, so every scope is
+    listed and the repository's own scopes are checked.
+    """
+    result = _git(project_dir, "config", "--list", "--show-scope", "--name-only")
+    unsafe: set[str] = set()
+    for line in result.stdout.splitlines():
+        scope, _, key = line.strip().partition("\t")
+        if scope in ("local", "worktree") and key and not _is_safe_repo_key(key):
+            unsafe.add(key.lower())
+    return sorted(unsafe)
+
+
+def _is_safe_repo_key(key: str) -> bool:
+    section, _, rest = key.partition(".")
+    subsection, _, variable = rest.rpartition(".")
+    section, variable = section.lower(), variable.lower()
+    if subsection:
+        return (section, variable) in SAFE_REPO_CONFIG_SUBSECTION_KEYS
+    return f"{section}.{variable}" in SAFE_REPO_CONFIG_KEYS
 
 
 def _unsafe_config_message(keys: list[str]) -> str:
     return (
-        f"refusing: the project's .git/config sets {', '.join(keys)}, which can redirect the push "
-        "or run a program; remove them (or move them to your global git config)"
+        f"refusing: the project's git config sets {', '.join(keys)}; auto-push only runs with plain "
+        "repository, identity, branch and remote url/fetch settings, because other keys can redirect "
+        "the push or run a program. Remove them (or move them to your global git config)"
     )
 
 

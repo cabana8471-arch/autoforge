@@ -156,7 +156,7 @@ python -m pytest test_project_skills.py       # Project skills: library (no ~/.c
 python -m pytest test_github_issues.py        # GitHub issue import: parsing, endpoints, comments excluded by default
 python -m pytest test_roadmap.py              # Backlog + maturity tags: ready checks, promote/backlog endpoints, scheduling order
 python -m pytest test_backlog_scheduling.py   # Backlog stays out of progress totals, stall reasons and completion message
-python -m pytest test_git_sync.py             # Git auto-push: stored URL only, unsafe local config / changed remote refused, hooks never run
+python -m pytest test_git_sync.py             # Git auto-push: stored URL only, repo config allowlist (local + worktree), changed remote refused, hooks never run
 ```
 
 ### React UI
@@ -212,7 +212,7 @@ Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publi
 - `quality_gates.py` - Lint/type-check auto-detection and enforcement before `feature_mark_passing`
 - `usage_tracker.py` - Per-session token/cost recording (from SDK `ResultMessage`) and per-project cost limit enforcement
 - `billing_utils.py` - Spend safeguards: billing-error detection (agents stop instead of retrying, exit code 3), `AUTOFORGE_MAX_BUDGET_USD` run cap (exit code 4); the orchestrator sums its run's `agent_usage` rows, never agent output
-- `git_sync.py` - Opt-in per-project auto-push after successful coding sessions: pushes only to the remote URL stored when the user enabled it, refuses on a changed remote or unsafe repo-local git config, hooks disabled, never forces (`server/routers/git_push.py`, Settings > Version Control)
+- `git_sync.py` - Opt-in per-project auto-push after successful coding sessions: pushes only to the remote URL stored when the user enabled it, refuses on a changed remote or any repo-scoped git config key (local + worktree) outside a safe allowlist, hooks disabled, never forces (`server/routers/git_push.py`, Settings > Version Control)
 - `project_skills.py` - Skill library (bundled + `~/.autoforge/skills/`) and per-project skill install/remove
 - `git_sync.py` - Optional auto-push of the project's current branch to its git remote after each successful coding session (`git_auto_push` setting / `AUTOFORGE_GIT_AUTO_PUSH`)
 - `api/database.py` - SQLAlchemy models (Feature, Schedule, ScheduleOverride)
