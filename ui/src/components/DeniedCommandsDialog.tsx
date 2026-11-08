@@ -29,7 +29,9 @@ const KIND_LABELS: Record<DeniedCommandKind, { label: string; hint: string }> = 
 
 /** Commands that could be unblocked by adding them to the project allowlist. */
 function allowableCommands(commands: DeniedCommandSummary[]): DeniedCommandSummary[] {
-  return commands.filter(c => c.kind === 'not_allowed' && c.command && !c.currently_allowed)
+  // The agent chooses what it runs: a name with "*" would become a prefix wildcard
+  // in the allowlist (python* allows python, python3, ...), so it is never suggested
+  return commands.filter(c => c.kind === 'not_allowed' && c.command && !c.command.includes('*') && !c.currently_allowed)
 }
 
 function buildAllowlistYaml(commands: DeniedCommandSummary[]): string {
