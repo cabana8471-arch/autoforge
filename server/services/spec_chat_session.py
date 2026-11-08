@@ -126,8 +126,23 @@ class SpecChatSession:
         self.created_at = datetime.now()
         self._conversation_id: Optional[str] = None
         self._client_entered: bool = False  # Track if context manager is active
+        # Set when the user closed the chat; applied as soon as a query reaches the CLI
+        self._interrupt_requested: bool = False
         self._system_prompt_file: Optional[Path] = None
         self._summary_path: Optional[Path] = None  # Set in start() once prompts dir is known
+
+    async def interrupt(self) -> None:
+        """Stop Claude's current turn (the user closed the chat); the stream then ends.
+
+        The request is remembered, so a turn whose client is still starting is
+        interrupted right after its query is sent.
+        """
+        self._interrupt_requested = True
+        if self.client and self._client_entered:
+            try:
+                await self.client.interrupt()
+            except Exception as e:
+                logger.warning(f"Error interrupting Claude client: {e}")
 
     async def close(self) -> None:
         """Clean up resources and close the Claude client."""
@@ -370,6 +385,10 @@ class SpecChatSession:
         else:
             # Text-only message: use string format
             await self.client.query(message)
+
+        if self._interrupt_requested:
+            # The chat was closed before or while the query was being sent
+            await self.interrupt()
 
         current_text = ""
 

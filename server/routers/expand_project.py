@@ -89,10 +89,14 @@ async def cancel_expand_session(project_name: str):
 # ============================================================================
 
 async def _forward_or_cancel(
-    websocket: WebSocket, inbox: WebSocketInbox, project_name: str, chunks: AsyncGenerator[dict, None]
+    websocket: WebSocket,
+    inbox: WebSocketInbox,
+    project_name: str,
+    session: ExpandChatSession,
+    chunks: AsyncGenerator[dict, None],
 ) -> bool:
     """Forward a turn; if the client closed the chat on purpose, stop the turn and close the session."""
-    if await forward_chunks(websocket, chunks, cancel=inbox.client_left):
+    if await forward_chunks(websocket, chunks, cancel=inbox.client_left, interrupt=session.interrupt):
         return True
     if inbox.client_left.is_set():
         await remove_expand_session(project_name)
@@ -199,7 +203,7 @@ async def expand_project_websocket(websocket: WebSocket, project_name: str):
                         session = await create_expand_session(project_name, project_dir, mode)
 
                         # Stream the initial greeting
-                        if not await _forward_or_cancel(websocket, inbox, project_name, session.start()):
+                        if not await _forward_or_cancel(websocket, inbox, project_name, session, session.start()):
                             break
 
                 elif msg_type == "message":
@@ -240,7 +244,7 @@ async def expand_project_websocket(websocket: WebSocket, project_name: str):
 
                     # Stream Claude's response
                     chunks = session.send_message(user_content, attachments if attachments else None)
-                    if not await _forward_or_cancel(websocket, inbox, project_name, chunks):
+                    if not await _forward_or_cancel(websocket, inbox, project_name, session, chunks):
                         break
 
                 elif msg_type == "done":

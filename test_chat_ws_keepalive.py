@@ -39,17 +39,31 @@ class FakeSession:
 
     def __init__(self):
         self.turn_finished = threading.Event()
+        self.interrupted = threading.Event()
+        self._interrupt: asyncio.Event | None = None
 
     async def start(self):
         yield {"type": "text", "content": "hello"}
         yield {"type": "response_done"}
 
     async def send_message(self, content, attachments=None):
+        self._interrupt = asyncio.Event()
         yield {"type": "text", "content": "working"}
-        await asyncio.sleep(TURN_SECONDS)
+        try:
+            # Like the CLI: an interrupt ends the turn early, without the rest of the answer.
+            await asyncio.wait_for(self._interrupt.wait(), TURN_SECONDS)
+            yield {"type": "response_done"}
+            return
+        except asyncio.TimeoutError:
+            pass
         yield {"type": "text", "content": "done"}
         yield {"type": "response_done"}
         self.turn_finished.set()
+
+    async def interrupt(self):
+        self.interrupted.set()
+        if self._interrupt is not None:
+            self._interrupt.set()
 
     def get_features_created(self):
         return 0
@@ -181,6 +195,7 @@ def test_turn_completes_when_connection_drops_mid_turn(chat_server, path):
     ws.socket.close()
     assert session.turn_finished.wait(timeout=TURN_SECONDS * 5)
     assert removed == []
+    assert not session.interrupted.is_set()
 
 
 @pytest.mark.parametrize("path", [
@@ -192,10 +207,11 @@ def test_closing_the_chat_mid_turn_cancels_it(chat_server, path):
     url, session, removed = chat_server
     with connect(url + path) as ws:
         _start_turn(ws)
-    # The turn stops at its next message and the session (Claude CLI) is closed.
-    deadline = time.monotonic() + TURN_SECONDS * 5
+    # The turn is interrupted right away (not at Claude's next message) and the session is closed.
+    deadline = time.monotonic() + TURN_SECONDS / 2
     while not removed and time.monotonic() < deadline:
         time.sleep(0.05)
+    assert session.interrupted.is_set()
     assert removed == ["proj"]
     assert not session.turn_finished.is_set()
 
@@ -207,3 +223,41 @@ def test_closing_the_assistant_mid_turn_still_persists_the_answer(chat_server):
         _start_turn(ws)
     assert session.turn_finished.wait(timeout=TURN_SECONDS * 5)
     assert removed == []
+    assert not session.interrupted.is_set()
+
+
+class _RecordingClient:
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def query(self, _message):
+        self.calls.append("query")
+
+    async def interrupt(self):
+        self.calls.append("interrupt")
+
+    async def receive_response(self):
+        from claude_agent_sdk import ResultMessage
+
+        yield ResultMessage(
+            subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="s",
+        )
+
+
+@pytest.mark.parametrize("session_cls", ["expand", "spec"])
+def test_interrupt_requested_before_the_client_is_ready_still_stops_the_turn(tmp_path, session_cls):
+    """Closing the chat while the session is still starting its CLI must interrupt the turn once it runs."""
+    from server.services.expand_chat_session import ExpandChatSession
+    from server.services.spec_chat_session import SpecChatSession
+
+    session = ExpandChatSession("demo", tmp_path) if session_cls == "expand" else SpecChatSession("demo", tmp_path)
+
+    async def run():
+        await session.interrupt()  # no client yet: the request must be remembered
+        client = _RecordingClient()
+        session.client = client
+        session._client_entered = True
+        [chunk async for chunk in session._query_claude("go")]
+        return client.calls
+
+    assert asyncio.run(run()) == ["query", "interrupt"]

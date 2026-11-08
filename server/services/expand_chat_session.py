@@ -254,11 +254,26 @@ class ExpandChatSession:
         self.created_at = datetime.now()
         self._conversation_id: Optional[str] = None
         self._client_entered: bool = False
+        # Set when the user closed the chat; applied as soon as a query reaches the CLI
+        self._interrupt_requested: bool = False
         self.features_created: int = 0
         self.created_feature_ids: list[int] = []
         self._settings_file: Optional[Path] = None
         self._system_prompt_file: Optional[Path] = None
         self._query_lock = asyncio.Lock()
+
+    async def interrupt(self) -> None:
+        """Stop Claude's current turn (the user closed the chat); the stream then ends.
+
+        The request is remembered, so a turn whose client is still starting is
+        interrupted right after its query is sent.
+        """
+        self._interrupt_requested = True
+        if self.client and self._client_entered:
+            try:
+                await self.client.interrupt()
+            except Exception as e:
+                logger.warning(f"Error interrupting Claude client: {e}")
 
     async def close(self) -> None:
         """Clean up resources and close the Claude client."""
@@ -542,6 +557,10 @@ class ExpandChatSession:
             logger.info(f"Sent multimodal message with {len(attachments)} attachment(s)")
         else:
             await self.client.query(message)
+
+        if self._interrupt_requested:
+            # The chat was closed before or while the query was being sent
+            await self.interrupt()
 
         # Feature-creation tool calls awaiting their result, keyed by tool_use_id
         pending_creates: dict[str, tuple[str, dict[str, Any]]] = {}
