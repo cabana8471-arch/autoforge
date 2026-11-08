@@ -126,6 +126,10 @@ python -m pytest test_file_state_guard.py     # Stale-read Write/Edit loop guard
 python -m pytest test_database_journal.py     # SQLite journal mode / WAL fallback tests
 python -m pytest test_expand_chat_session.py  # Expand chat: created-feature events, tool permissions
 python -m pytest test_subprocess_encoding.py  # Subprocess UTF-8 encoding tests
+python -m pytest test_prompts.py              # Prompt assembly tests (regression-script injection)
+python -m pytest test_prompt_migrations.py    # Prompt version migrations: idempotent, custom prompts untouched
+python -m pytest test_project_layout.py       # No root app_spec.txt copy for new projects
+python -m pytest test_spec_readers_path.py    # Spec readers resolve .autoforge/prompts/
 ```
 
 ### React UI
@@ -523,6 +527,12 @@ The orchestrator enforces strict bounds on concurrent processes:
 - `MAX_TOTAL_AGENTS = 10` - Hard limit on total agents (coding + testing)
 - Testing agents are capped at `max_concurrency` (same as coding agents)
 - Total process count never exceeds 11 Python processes (1 orchestrator + 5 coding + 5 testing)
+
+### Scripted Regression Tests
+
+To keep regression testing cheap, `prompts.py` injects two instructions at runtime (applies to existing projects with customized prompts too):
+- **Coding agents** (non-YOLO) get a STEP 5.8: after browser verification, save a headless `@playwright/test` script at `tests/regression/feature-<ID>.spec.ts` and commit it
+- **Testing agents** get a header telling them to run that script first (`npx playwright test tests/regression/feature-<ID>.spec.ts`); manual browser testing only happens when the script is missing (then they write it) or failing
 
 ### Multi-Feature Batching
 
