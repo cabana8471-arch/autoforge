@@ -132,6 +132,7 @@ python -m pytest test_project_layout.py       # No root app_spec.txt copy for ne
 python -m pytest test_spec_readers_path.py    # Spec readers resolve .autoforge/prompts/
 python -m pytest test_manual_testing.py       # Manual Testing lane: state, blocking, verdict endpoint, MCP tool
 python -m pytest test_feature_update.py        # Editing features, incl. reopening completed ones
+python -m pytest test_testing_model.py         # Separate model for testing agents (CLI, settings, UI start)
 ```
 
 ### React UI

@@ -681,6 +681,7 @@ export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export interface Settings {
   yolo_mode: boolean
   model: string
+  testing_model: string | null  // Model for testing agents (null = same as coding model)
   glm_mode: boolean
   ollama_mode: boolean
   testing_agent_ratio: number  // Regression testing agents (0-3)
@@ -697,6 +698,7 @@ export interface Settings {
 export interface SettingsUpdate {
   yolo_mode?: boolean
   model?: string
+  testing_model?: string  // '' clears the override
   testing_agent_ratio?: number
   batch_size?: number
   testing_batch_size?: number
