@@ -55,6 +55,12 @@ class TestSpecOnlyWriteHook(unittest.TestCase):
         assert _run_hook(self.hook, "Write", {})["decision"] == "block"
         assert _run_hook(self.hook, "NotebookEdit", {"notebook_path": "x.ipynb"})["decision"] == "block"
 
+    def test_blocks_relative_paths(self):
+        # The CLI resolves relative paths against its cwd (the project root), not the
+        # spec folder, so "app_spec.txt" would land in the project root
+        assert _run_hook(self.hook, "Write", {"file_path": "app_spec.txt"})["decision"] == "block"
+        assert _run_hook(self.hook, "Write", {"file_path": ".autoforge/prompts/app_spec.txt"})["decision"] == "block"
+
     def test_ignores_other_tools(self):
         assert _run_hook(self.hook, "Read", {"file_path": str(self.project / "src" / "app.ts")}) == {}
 
@@ -169,6 +175,10 @@ class TestOnboardSession(unittest.TestCase):
         assert "Bash" in options.disallowed_tools and "MultiEdit" in options.disallowed_tools
         assert "PreToolUse" in options.hooks
         assert "ONLY for `.autoforge/prompts/app_spec.txt`" in captured["prompt"]
+        # The analyzed codebase is untrusted input: no web tools to send data out
+        for tool in ("WebFetch", "WebSearch"):
+            assert tool not in options.allowed_tools
+            assert tool in options.disallowed_tools
 
     def test_expand_session_does_not_enable_passes(self):
         prompts = self.project / ".autoforge" / "prompts"
