@@ -46,6 +46,8 @@ assistant.db-shm
 .system_prompt.*.md
 .progress_cache
 .migration_version
+denied_commands.jsonl
+denied_commands.jsonl.1
 
 # Validation artifacts (screenshots, etc.) captured during feature verification
 validation/
@@ -234,6 +236,17 @@ def get_knowledge_dir(project_dir: Path) -> Path:
     that every agent session is pointed at.
     """
     return project_dir / ".autoforge" / "knowledge"
+
+
+def get_denied_commands_path(project_dir: Path) -> Path:
+    """Return the path to ``denied_commands.jsonl``.
+
+    Append-only log of Bash commands rejected by the security hook, kept so
+    users can review them and extend the allowlist later.  Rotated to
+    ``denied_commands.jsonl.1`` when it grows too large.  Always uses the new
+    location since it is a runtime log.
+    """
+    return project_dir / ".autoforge" / "denied_commands.jsonl"
 
 
 def get_expand_settings_path(project_dir: Path, uuid_hex: str) -> Path:

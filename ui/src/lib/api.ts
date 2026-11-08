@@ -8,6 +8,7 @@ import type {
   ProjectPrompts,
   ProjectSettingsUpdate,
   ProjectUsage,
+  DeniedCommandsResponse,
   FeatureListResponse,
   Feature,
   FeatureCreate,
@@ -209,6 +210,16 @@ export async function reattachProject(name: string): Promise<ReattachResponse> {
 
 export async function getDetachStatus(name: string): Promise<DetachStatusResponse> {
   return fetchJSON(`/projects/${encodeURIComponent(name)}/detach-status`)
+}
+
+export async function getDeniedCommands(name: string): Promise<DeniedCommandsResponse> {
+  return fetchJSON(`/projects/${encodeURIComponent(name)}/denied-commands`)
+}
+
+export async function clearDeniedCommands(name: string): Promise<void> {
+  await fetchJSON(`/projects/${encodeURIComponent(name)}/denied-commands`, {
+    method: 'DELETE',
+  })
 }
 
 // ============================================================================

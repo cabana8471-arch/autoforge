@@ -16,8 +16,11 @@ from typing import Any, Callable
 from fastapi import APIRouter, HTTPException
 
 from api.safe_project_io import UnsafeProjectPathError
+from security import clear_denied_commands, summarize_denied_commands
 
 from ..schemas import (
+    DeniedCommandsResponse,
+    DeniedCommandSummary,
     DetachResponse,
     DetachStatusResponse,
     ProjectCreate,
@@ -825,3 +828,24 @@ async def reattach_project(name: str):
         conflicts=conflicts,
         conflicts_backup_path=".autoforge-pre-reattach-backup" if conflicts else None,
     )
+
+
+@router.get("/{name}/denied-commands", response_model=DeniedCommandsResponse)
+async def get_denied_commands(name: str):
+    """List Bash commands the agent tried to run but were rejected by the security hook."""
+    project_dir = _resolve_existing_project_dir(name)
+
+    commands = summarize_denied_commands(project_dir)
+    return DeniedCommandsResponse(
+        commands=[DeniedCommandSummary(**c) for c in commands],
+        total=sum(c["count"] for c in commands),
+    )
+
+
+@router.delete("/{name}/denied-commands")
+async def clear_denied_commands_endpoint(name: str):
+    """Clear the project's denied-commands log."""
+    project_dir = _resolve_existing_project_dir(name)
+
+    clear_denied_commands(project_dir)
+    return {"success": True}

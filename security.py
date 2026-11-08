@@ -8,10 +8,12 @@ Uses an allowlist approach - only explicitly permitted commands can run.
 
 import asyncio
 import glob
+import json
 import logging
 import os
 import re
 import shlex
+from datetime import datetime, timezone
 from pathlib import Path, PurePath
 from typing import Optional
 
@@ -1367,6 +1369,158 @@ def _shell_c_payloads(line: str) -> list[str] | None:
     return payloads
 
 
+# ---------------------------------------------------------------------------
+# Denied-commands log
+# ---------------------------------------------------------------------------
+# Every Bash command the hook refuses is appended (one JSON object per line) to
+# .autoforge/denied_commands.jsonl, so the user can see what the agent tried
+# and decide what to add to the allowlist. The hook runs outside the agent's
+# sandbox and the command text is the agent's, so the log is written with
+# api.safe_project_io (no planted symlink or hard link is followed), rotated by
+# an atomic rename to ``.1`` (#322), and read-only for the agent (client.py).
+
+DENIAL_NOT_ALLOWED = "not_allowed"  # Not on any allowlist: the user may add it to allowed_commands.yaml
+DENIAL_BLOCKLISTED = "blocklisted"  # Hardcoded or org blocklist: projects cannot allow it
+DENIAL_VALIDATION = "validation"  # Allowed command whose arguments or target failed a check
+DENIAL_PARSE_ERROR = "parse_error"  # The command could not be parsed safely
+
+DENIED_LOG_MAX_BYTES = 1024 * 1024  # Rotate to .1 above this size (one older file kept)
+DENIED_LOG_MAX_FIELD_CHARS = 2000  # A huge heredoc cannot bloat the log
+
+# Internal keys on a block result (removed before the CLI sees it)
+_DENIED_COMMAND_KEY = "_denied_command"
+_DENIAL_KIND_KEY = "_denial_kind"
+
+
+def _block(reason: str, kind: str, command: Optional[str] = None) -> dict:
+    """A block decision, tagged with what the denied-commands log records."""
+    return {"decision": "block", "reason": reason, _DENIAL_KIND_KEY: kind, _DENIED_COMMAND_KEY: command}
+
+
+def protected_log_paths(project_dir: Path) -> list[str]:
+    """Absolute paths of the denied-commands log (and its rotated copy): written only by the hook."""
+    from autoforge_paths import get_denied_commands_path
+
+    log = get_denied_commands_path(project_dir.resolve())
+    return [str(log), str(log.with_name(log.name + ".1"))]
+
+
+def _rotated_log_path(log: Path) -> Path:
+    return log.with_name(log.name + ".1")
+
+
+def _rotate_denied_log(project_dir: Path, log: Path) -> None:
+    """Rename the log to ``.1`` once it is too large (atomic; never follows a planted link)."""
+    from api import safe_project_io as sio
+
+    try:
+        st = os.lstat(log)
+    except FileNotFoundError:
+        return
+    if st.st_size <= DENIED_LOG_MAX_BYTES:
+        return
+    relative = log.relative_to(project_dir.resolve())
+    if sio.DIR_FD_SUPPORTED:
+        dir_fd = sio.open_dir(project_dir.resolve(), relative.parts[:-1])
+        if dir_fd is None:
+            return
+        try:
+            # rename() moves the entry itself: a planted link is renamed, never followed
+            os.rename(log.name, _rotated_log_path(log).name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        finally:
+            os.close(dir_fd)
+    elif not sio.is_link_or_junction(log.parent):
+        os.replace(log, _rotated_log_path(log))
+
+
+def record_denied_command(
+    project_dir: Path, command: str, denied_cmd: Optional[str], kind: str, reason: str
+) -> None:
+    """Append a refused command to the project's log. Never raises: the decision does not depend on it."""
+    try:
+        from api.safe_project_io import append_project_file
+        from autoforge_paths import get_denied_commands_path
+
+        root = project_dir.resolve()
+        log = get_denied_commands_path(root)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "command": denied_cmd,
+            "kind": kind,
+            "full_command": command[:DENIED_LOG_MAX_FIELD_CHARS],
+            "reason": reason[:DENIED_LOG_MAX_FIELD_CHARS],
+        }
+        _rotate_denied_log(root, log)
+        append_project_file(root, log, (json.dumps(entry) + "\n").encode("utf-8"))
+    except Exception as e:
+        logger.warning("Failed to record denied command: %s", e)
+
+
+def load_denied_commands(project_dir: Path) -> list[dict]:
+    """Entries of the rotated and current log, oldest first (malformed lines skipped).
+
+    Raises:
+        UnsafeProjectPathError: a log file or its directory is a planted link
+    """
+    from api.safe_project_io import open_project_file_for_read
+    from autoforge_paths import get_denied_commands_path
+
+    root = project_dir.resolve()
+    log = get_denied_commands_path(root)
+    entries: list[dict] = []
+    for path in (_rotated_log_path(log), log):
+        try:
+            f = open_project_file_for_read(root, path)
+        except FileNotFoundError:
+            continue
+        with f:
+            for raw in f:
+                try:
+                    entry = json.loads(raw.decode("utf-8", errors="replace"))
+                except ValueError:
+                    continue
+                if isinstance(entry, dict):
+                    entries.append(entry)
+    return entries
+
+
+def summarize_denied_commands(project_dir: Path) -> list[dict]:
+    """Log entries grouped by (command, kind), most frequent first.
+
+    Each group has: command, kind, count, first_seen, last_seen, last_full_command,
+    last_reason and currently_allowed (the command is on the effective allowlist now).
+    """
+    allowed_commands, _ = get_effective_commands(project_dir)
+    groups: dict[tuple[str, str], dict] = {}
+    for entry in load_denied_commands(project_dir):
+        cmd = entry.get("command") or ""
+        kind = entry.get("kind") or DENIAL_NOT_ALLOWED
+        ts = entry.get("timestamp", "")
+        group = groups.setdefault((cmd, kind), {
+            "command": cmd, "kind": kind, "count": 0, "first_seen": ts, "last_seen": ts,
+            "last_full_command": "", "last_reason": "", "currently_allowed": False,
+        })
+        group["count"] += 1
+        group["last_seen"] = ts  # entries are chronological: the latest wins
+        group["last_full_command"] = entry.get("full_command", "")
+        group["last_reason"] = entry.get("reason", "")
+    for group in groups.values():
+        if group["kind"] == DENIAL_NOT_ALLOWED and group["command"]:
+            group["currently_allowed"] = is_command_allowed(group["command"], allowed_commands)
+    return sorted(groups.values(), key=lambda g: (-g["count"], g["command"]))
+
+
+def clear_denied_commands(project_dir: Path) -> None:
+    """Delete the log and its rotated copy (a planted link is removed, never its target)."""
+    from api.safe_project_io import unlink_project_file
+    from autoforge_paths import get_denied_commands_path
+
+    root = project_dir.resolve()
+    log = get_denied_commands_path(root)
+    for path in (log, _rotated_log_path(log)):
+        unlink_project_file(root, path, missing_ok=True)
+
+
 def _validate_command_line(
     line: str,
     project_dir: Optional[Path],
@@ -1380,24 +1534,20 @@ def _validate_command_line(
     # The project allowlist widens what the agent may run: the agent may read it, never change it.
     # (The Bash sandbox also mounts it read-only; this gives the agent the reason.)
     if PROJECT_ALLOWLIST_NAME in line and (">" in line or any(c not in ALLOWLIST_READ_COMMANDS for c in commands)):
-        return {
-            "decision": "block",
-            "reason": (
-                f"Only the user can change {PROJECT_ALLOWLIST_FILES[0]}. "
-                "Do not edit it; if a command is missing, tell the user which one and why."
-            ),
-        }
+        return _block(
+            f"Only the user can change {PROJECT_ALLOWLIST_FILES[0]}. "
+            "Do not edit it; if a command is missing, tell the user which one and why.",
+            DENIAL_VALIDATION,
+        )
 
     # The feature database changes only through the feature MCP server. The sandbox mounts it
     # read-only, where even a read fails (SQLite writes its -wal/-shm files): give the reason up front.
     if PROJECT_DATABASE_NAME in line and any(c not in DATABASE_LIST_COMMANDS for c in commands):
-        return {
-            "decision": "block",
-            "reason": (
-                f"{PROJECT_DATABASE_NAME} is read-only for Bash (even reads fail in the sandbox). "
-                "Use the feature_* MCP tools to read or change features."
-            ),
-        }
+        return _block(
+            f"{PROJECT_DATABASE_NAME} is read-only for Bash (even reads fail in the sandbox). "
+            "Use the feature_* MCP tools to read or change features.",
+            DENIAL_VALIDATION,
+        )
 
     # Split into segments for per-command validation
     segments = split_command_segments(line)
@@ -1406,10 +1556,9 @@ def _validate_command_line(
     for cmd in commands:
         # Check blocklist first (highest priority)
         if cmd in blocked_commands:
-            return {
-                "decision": "block",
-                "reason": f"Command '{cmd}' is blocked at organization level and cannot be approved.",
-            }
+            return _block(
+                f"Command '{cmd}' is blocked at organization level and cannot be approved.", DENIAL_BLOCKLISTED, cmd
+            )
 
         # Check allowlist (with pattern matching)
         if not is_command_allowed(cmd, allowed_commands):
@@ -1419,10 +1568,7 @@ def _validate_command_line(
                 f"Ask the user to add it to {PROJECT_ALLOWLIST_FILES[0]} (only the user can change that file).\n"
             )
             error_msg += "Note: Some commands are blocked at org-level and cannot be overridden."
-            return {
-                "decision": "block",
-                "reason": error_msg,
-            }
+            return _block(error_msg, DENIAL_NOT_ALLOWED, cmd)
 
         # Additional validation for sensitive commands
         if cmd in COMMANDS_NEEDING_EXTRA_VALIDATION:
@@ -1448,7 +1594,7 @@ def _validate_command_line(
                 else:
                     continue
                 if not allowed:
-                    return {"decision": "block", "reason": reason}
+                    return _block(reason, DENIAL_VALIDATION, cmd)
 
     return {}
 
@@ -1463,7 +1609,7 @@ def _validate_shell_source(
 ) -> dict:
     """Validate shell source line by line, recursing into bash -c payloads and substitutions."""
     if depth > MAX_NESTED_SHELL_DEPTH:
-        return {"decision": "block", "reason": "Command nests shells or substitutions too deeply to validate"}
+        return _block("Command nests shells or substitutions too deeply to validate", DENIAL_PARSE_ERROR)
 
     lines, nested = _split_shell_source(source)
     validated = False
@@ -1473,7 +1619,7 @@ def _validate_shell_source(
             script, project_dir, allowed_commands, blocked_commands, pkill_processes, depth + 1
         )
         if result:
-            return {"decision": "block", "reason": f"In nested command {script!r}: {result['reason']}"}
+            return {**result, "reason": f"In nested command {script!r}: {result['reason']}"}
         return {}
 
     for line in lines:
@@ -1481,7 +1627,7 @@ def _validate_shell_source(
             try:
                 shlex.split(line)
             except ValueError:
-                return {"decision": "block", "reason": f"Could not parse command for security validation: {line}"}
+                return _block(f"Could not parse command for security validation: {line}", DENIAL_PARSE_ERROR)
             continue  # Parses but runs nothing (e.g. 'done', 'fi', a loop header)
         validated = True
 
@@ -1491,7 +1637,7 @@ def _validate_shell_source(
 
         payloads = _shell_c_payloads(line)
         if payloads is None:
-            return {"decision": "block", "reason": f"Could not parse shell invocation for security validation: {line}"}
+            return _block(f"Could not parse shell invocation for security validation: {line}", DENIAL_PARSE_ERROR)
         for payload in payloads:
             result = check_nested(payload)
             if result:
@@ -1504,10 +1650,7 @@ def _validate_shell_source(
 
     if not validated:
         # Could not find any command - fail safe by blocking
-        return {
-            "decision": "block",
-            "reason": f"Could not parse command for security validation: {source}",
-        }
+        return _block(f"Could not parse command for security validation: {source}", DENIAL_PARSE_ERROR)
     return {}
 
 
@@ -1567,7 +1710,16 @@ def validate_bash_tool_use(input_data, context=None):
     pkill_processes = get_effective_pkill_processes(project_dir)
 
     try:
-        return _validate_shell_source(command, project_dir, allowed_commands, blocked_commands, pkill_processes)
+        result = _validate_shell_source(command, project_dir, allowed_commands, blocked_commands, pkill_processes)
     except Exception as e:  # Fail closed: a parser error must never let a command through
         logger.warning("bash security hook failed to validate %r: %s", command, e)
-        return {"decision": "block", "reason": f"Could not validate command ({type(e).__name__}): {command}"}
+        result = _block(f"Could not validate command ({type(e).__name__}): {command}", DENIAL_PARSE_ERROR)
+    if not result:
+        return {}
+
+    # The CLI gets only the decision and reason; the denial details go to the project's log
+    denied_cmd = result.pop(_DENIED_COMMAND_KEY, None)
+    kind = result.pop(_DENIAL_KIND_KEY, DENIAL_VALIDATION)
+    if project_dir is not None:
+        record_denied_command(project_dir, command, denied_cmd, kind, result.get("reason", ""))
+    return result

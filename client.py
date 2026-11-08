@@ -23,6 +23,7 @@ from security import (
     cli_absolute_rule,
     protected_config_paths,
     protected_database_paths,
+    protected_log_paths,
 )
 
 # Load environment variables from .env file if present
@@ -436,7 +437,13 @@ def create_client(
     # the feature MCP server, which runs outside the sandbox.
     # Edit deny blocks the file tools (through symlinks too); denyWrite makes them
     # read-only for sandboxed Bash, interpreters included.
-    protected_files = [*protected_config_paths(project_dir), *protected_database_paths(project_dir)]
+    # The denied-commands log is written only by the Bash hook (outside the sandbox), so the
+    # agent cannot forge entries that would talk the user into widening the allowlist.
+    protected_files = [
+        *protected_config_paths(project_dir),
+        *protected_database_paths(project_dir),
+        *protected_log_paths(project_dir),
+    ]
     security_settings = {
         "sandbox": {
             "enabled": True,

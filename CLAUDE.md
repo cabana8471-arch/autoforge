@@ -157,6 +157,8 @@ python -m pytest test_github_issues.py        # GitHub issue import: parsing, en
 python -m pytest test_roadmap.py              # Backlog + maturity tags: ready checks, promote/backlog endpoints, scheduling order
 python -m pytest test_backlog_scheduling.py   # Backlog stays out of progress totals, stall reasons and completion message
 python -m pytest test_git_sync.py             # Git auto-push: stored URL only, repo config allowlist (local + worktree), changed remote refused, hooks never run
+python -m pytest test_denied_commands_log.py  # Denied-commands log: kinds, no planted links followed, atomic .1 rotation, read-only for the agent
+python -m pytest test_denied_commands_api.py  # Denied-commands REST endpoints (list grouped, clear)
 ```
 
 ### React UI
@@ -363,6 +365,7 @@ Projects can be stored in any directory (registered in `~/.autoforge/registry.db
 - `.autoforge/features.db` - SQLite database with feature test cases
 - `.autoforge/.agent.lock` - Lock file to prevent multiple agent instances
 - `.autoforge/allowed_commands.yaml` - Project-specific bash command allowlist (optional)
+- `.autoforge/denied_commands.jsonl` (+ `.1` after rotation) - Bash commands the security hook refused, written only by the hook (read-only for the agent); shown by the shield button in the control bar (`GET/DELETE /api/projects/{name}/denied-commands`)
 - `.autoforge/validation/` - Validation artifacts (screenshots) captured while agents verify features - gitignored via `.autoforge/.gitignore`
 - `.autoforge/knowledge/` - User-uploaded markdown docs (requirements, research); every agent prompt is prefixed with a list of these files (`prompts.with_project_knowledge`). Managed via the book icon in the agent controls
 - `.autoforge/.gitignore` - Ignores runtime files

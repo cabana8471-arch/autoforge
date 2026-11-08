@@ -28,7 +28,7 @@ from unittest.mock import patch
 
 import pytest
 
-from security import cli_absolute_rule, protected_config_paths, protected_database_paths
+from security import cli_absolute_rule, protected_database_paths
 
 
 class _AbortingClient:
@@ -74,9 +74,10 @@ def test_agent_settings_make_the_database_read_only(project: Path) -> None:
         client.create_client(project, "claude-opus-4-6")
 
     settings = json.loads((project / ".autoforge" / ".claude_settings.json").read_text(encoding="utf-8"))
-    protected = [*protected_config_paths(project), *protected_database_paths(project)]
-    assert settings["sandbox"]["filesystem"]["denyWrite"] == protected
-    assert settings["permissions"]["deny"] == [cli_absolute_rule("Edit", Path(path)) for path in protected]
+    # (the allowlist and the denied-commands log are protected next to it)
+    for path in protected_database_paths(project):
+        assert path in settings["sandbox"]["filesystem"]["denyWrite"]
+        assert cli_absolute_rule("Edit", Path(path)) in settings["permissions"]["deny"]
 
 
 def test_spec_chat_denies_the_file_tools_on_the_database(project: Path) -> None:
