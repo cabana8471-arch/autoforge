@@ -16,6 +16,8 @@ import re
 from pathlib import Path
 from typing import TypedDict
 
+from autoforge_paths import get_prompts_dir
+
 # =============================================================================
 # Constants
 # =============================================================================
@@ -204,7 +206,7 @@ def get_ui_config_from_spec(project_dir: Path) -> UIConfig | None:
     Returns:
         UIConfig if app_spec.txt exists and can be parsed, None otherwise.
     """
-    spec_path = project_dir / "prompts" / "app_spec.txt"
+    spec_path = get_prompts_dir(project_dir) / "app_spec.txt"
     if not spec_path.exists():
         return None
 

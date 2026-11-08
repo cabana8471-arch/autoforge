@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from autoforge_paths import get_design_tokens_path
+from autoforge_paths import get_design_tokens_path, get_prompts_dir
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +199,7 @@ class DesignTokensManager:
             return self._load_from_config()
 
         # Try to parse from app_spec.txt
-        app_spec = self.project_dir / "prompts" / "app_spec.txt"
+        app_spec = get_prompts_dir(self.project_dir) / "app_spec.txt"
         if app_spec.exists():
             tokens = self._parse_from_app_spec(app_spec)
             if tokens:

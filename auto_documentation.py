@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from autoforge_paths import get_prompts_dir
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,7 +125,7 @@ class DocumentationGenerator:
 
     def _parse_app_spec(self) -> Optional[dict]:
         """Parse app_spec.txt XML file."""
-        spec_path = self.project_dir / "prompts" / "app_spec.txt"
+        spec_path = get_prompts_dir(self.project_dir) / "app_spec.txt"
         if not spec_path.exists():
             return None
 
