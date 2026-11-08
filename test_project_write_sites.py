@@ -651,3 +651,22 @@ def test_log_export_refuses_symlinked_exports_dir(
     with pytest.raises(HTTPException):
         _export_logs(project, monkeypatch, "jsonl")
     assert _outside_names(outside) == set()
+
+
+def test_layout_migration_skips_windows_junctions(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A junction at .autoforge/.autocoder/prompts is treated like a symlink (is_symlink() misses it)."""
+    junctions = {".autoforge", ".autocoder"}
+    monkeypatch.setattr(
+        sio, "_reparse_tag", lambda path: sio._IO_REPARSE_TAG_MOUNT_POINT if Path(path).name in junctions else 0,
+        raising=False,
+    )
+    (project / "features.db").write_text("db")  # would be copied into .autoforge/
+
+    assert autoforge_paths.migrate_project_layout(project) == []
+    assert list((project / ".autoforge").iterdir()) == []
+
+    junctions.discard(".autoforge")
+    (project / ".autocoder").mkdir()
+    (project / ".autocoder" / "id_rsa").write_text("secret")  # stands for the junction's outside target
+    autoforge_paths.migrate_project_layout(project)
+    assert (project / ".autocoder" / "id_rsa").exists() and not (project / ".autoforge" / "id_rsa").exists()

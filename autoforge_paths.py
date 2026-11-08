@@ -280,13 +280,15 @@ def _merge_autocoder_dir(old_dir: Path, new_dir: Path) -> list[str]:
     """Move entries from a legacy ``.autocoder/`` into an existing ``.autoforge/``.
 
     Entries already present in ``.autoforge/`` are left untouched (the new
-    location wins), and symlinked entries are never moved.
+    location wins), and symlinked entries (or Windows junctions) are never moved.
     ``.autocoder/`` is removed once it is empty.
     """
+    from api.safe_project_io import is_link_or_junction
+
     migrated: list[str] = []
     for entry in sorted(old_dir.iterdir()):
         dest = new_dir / entry.name
-        if dest.exists() or entry.is_symlink():
+        if dest.exists() or is_link_or_junction(entry):
             continue
         try:
             shutil.move(str(entry), str(dest))
@@ -321,7 +323,7 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         already migrated, the agent is running, or ``.autoforge`` is a symlink).
     """
     from api.database import check_project_database_path
-    from api.safe_project_io import read_project_file, write_project_file
+    from api.safe_project_io import is_link_or_junction, read_project_file, write_project_file
 
     # Safety: refuse to migrate while an agent is running
     if has_agent_running(project_dir):
@@ -334,13 +336,13 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
     migrated: list[str] = []
     # Every step below moves or copies files into .autoforge/: a symlink there
     # would send them out of the project
-    if new_autoforge_dir.is_symlink():
+    if is_link_or_junction(new_autoforge_dir):
         logger.warning("Migration skipped: %s is a symlink", new_autoforge_dir)
         return []
     # Never follow symlinks: this runs outside the agent's sandbox, and a legacy
     # path the agent turned into a symlink would make us move or copy files from
     # anywhere into the project.
-    if old_autocoder_dir.is_symlink():
+    if is_link_or_junction(old_autocoder_dir):
         logger.warning("Not migrating %s: it is a symlink", old_autocoder_dir)
     elif old_autocoder_dir.is_dir() and not new_autoforge_dir.exists():
         try:
@@ -360,7 +362,7 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
     try:
         old_prompts = project_dir / "prompts"
         new_prompts = autoforge_dir / "prompts"
-        if old_prompts.is_dir() and not old_prompts.is_symlink() and not new_prompts.exists():
+        if old_prompts.is_dir() and not is_link_or_junction(old_prompts) and not new_prompts.exists():
             # symlinks=True copies links as links: a link planted inside prompts/
             # must not copy a file from outside the project into it
             shutil.copytree(str(old_prompts), str(new_prompts), symlinks=True)
@@ -376,7 +378,7 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         try:
             old_db = project_dir / db_name
             new_db = autoforge_dir / db_name
-            if old_db.exists() and not old_db.is_symlink() and not new_db.exists():
+            if old_db.exists() and not is_link_or_junction(old_db) and not new_db.exists():
                 # SQLite follows links at the -wal/-shm files and at new_db's companions
                 check_project_database_path(project_dir, old_db)
                 check_project_database_path(project_dir, new_db)
@@ -431,7 +433,7 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         try:
             old_file = project_dir / filename
             new_file = autoforge_dir / filename
-            if old_file.exists() and not old_file.is_symlink() and not new_file.exists():
+            if old_file.exists() and not is_link_or_junction(old_file) and not new_file.exists():
                 shutil.move(str(old_file), str(new_file))
                 migrated.append(f"{filename} -> .autoforge/{filename}")
                 logger.info("Migrated %s -> .autoforge/%s", filename, filename)

@@ -182,13 +182,33 @@ def _project_relative(project_dir: Path, target: Path) -> Path:
     raise UnsafeProjectPathError(f"{target} is not inside the project {project_dir}")
 
 
+# A Windows junction (directory mount point) redirects like a symlink, but
+# Path.is_symlink() is False for it. Path.is_junction() (Python 3.12+) checks this
+# reparse tag; reading it from lstat() works on Python 3.11 too. The constant is the
+# documented Windows value (``stat`` only defines it on Windows).
+_IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+
+
+def _reparse_tag(path: Path) -> int:
+    """The Windows reparse tag of ``path`` itself (0 elsewhere or when missing)."""
+    try:
+        return int(getattr(os.lstat(path), "st_reparse_tag", 0))
+    except OSError:
+        return 0
+
+
+def is_link_or_junction(path: Path) -> bool:
+    """True when ``path`` itself is a symlink or a Windows junction."""
+    return path.is_symlink() or _reparse_tag(path) == _IO_REPARSE_TAG_MOUNT_POINT
+
+
 def _refuse_symlinks(project_dir: Path, relative: Path) -> Path:
-    """Path-based check for platforms without dir_fd: no symlink below the project."""
+    """Path-based check for platforms without dir_fd: no symlink or junction below the project."""
     current = project_dir
     for name in relative.parts:
         current = current / name
-        if current.is_symlink():
-            raise UnsafeProjectPathError(f"{current} is a symlink")
+        if is_link_or_junction(current):
+            raise UnsafeProjectPathError(f"{current} is a symlink or junction")
     return current
 
 
@@ -547,6 +567,9 @@ def copy_project_entry(project_dir: Path, source: Path, target: Path) -> None:
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = dst_path.with_name(tmp_name)
         try:
+            if _reparse_tag(src_path) == _IO_REPARSE_TAG_MOUNT_POINT:
+                # copytree would copy the junction's (outside) target
+                raise UnsafeProjectPathError(f"{src_path} is a junction")
             if src_path.is_symlink():
                 tmp_path.symlink_to(os.readlink(src_path))
             elif src_path.is_dir():

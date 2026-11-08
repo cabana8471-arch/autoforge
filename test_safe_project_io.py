@@ -415,3 +415,39 @@ def test_copy_project_entry_refuses_symlinked_parents(root, outside, monkeypatch
 
     assert not (root / "stolen.txt").exists()
     assert {p.name for p in outside.iterdir()} == {"id_rsa"}
+
+
+def _fake_junction(monkeypatch, name="junction"):
+    """Make ``name`` look like a Windows junction (a directory reparse point)."""
+    monkeypatch.setattr(
+        sio, "_reparse_tag", lambda path: sio._IO_REPARSE_TAG_MOUNT_POINT if Path(path).name == name else 0,
+        raising=False,  # lets the test run (and fail) against a module without junction support
+    )
+
+
+def test_path_fallback_refuses_windows_junctions(root, monkeypatch):
+    """Without dir_fd (Windows) a junction is refused like a symlink; is_symlink() misses it."""
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", False)
+    junction = root / "junction"  # a real directory standing in for a junction
+    (junction / "tree").mkdir(parents=True)
+    (junction / "x.txt").write_bytes(b"x")
+    _fake_junction(monkeypatch)
+
+    calls = [
+        lambda: sio.write_project_file(root, junction / "new.txt", b"x"),
+        lambda: sio.append_project_file(root, junction / "x.txt", b"x"),
+        lambda: sio.create_project_file_exclusive(root, junction / "lock", b"x"),
+        lambda: sio.make_project_dirs(root, junction / "sub"),
+        lambda: sio.read_project_file(root, junction / "x.txt"),
+        lambda: sio.check_project_file(root, junction / "x.txt"),
+        lambda: sio.unlink_project_file(root, junction / "x.txt"),
+        lambda: sio.remove_project_tree(root, junction / "tree"),
+        lambda: sio.copy_project_entry(root, junction, root / "copy"),
+        lambda: sio.copy_project_entry(root, junction / "x.txt", root / "copy.txt"),
+    ]
+    for call in calls:
+        with pytest.raises(sio.UnsafeProjectPathError):
+            call()
+    assert sorted(p.name for p in junction.iterdir()) == ["tree", "x.txt"]
+    assert not (root / "copy").exists() and not (root / "copy.txt").exists()
+    assert sio.is_link_or_junction(junction) and not junction.is_symlink()
