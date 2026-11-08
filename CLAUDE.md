@@ -145,6 +145,7 @@ python -m pytest test_project_database_links.py  # features/assistant/logs .db (
 python -m pytest test_onboard_project.py       # Onboarding: spec-only write hook, passes=true only in the onboard session
 python -m pytest test_chat_ws_keepalive.py     # Chat WebSockets: long turns survive pings, network drop finishes the turn, closing the chat cancels it
 python -m pytest test_allowlist_protection.py     # The agent cannot edit the project allowlist (settings deny, sandbox denyWrite, Bash hook)
+python -m pytest test_api_providers.py        # API provider env tests (GLM, etc.)
 ```
 
 ### React UI
