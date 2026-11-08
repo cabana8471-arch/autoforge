@@ -952,6 +952,7 @@ export interface SkillInstallResponse {
 
 export interface GitPushStatus {
   enabled: boolean
+  is_git_repo: boolean        // False: the project folder is not a git repository
   remote: string | null
   url: string | null          // Stored (trusted) URL that pushes go to
   current_url: string | null  // What `git remote get-url <remote>` says now

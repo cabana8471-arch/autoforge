@@ -26,6 +26,7 @@ _REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$")
 
 class GitPushStatus(BaseModel):
     enabled: bool
+    is_git_repo: bool = True
     remote: str | None = None
     url: str | None = None  # Stored (trusted) URL that pushes go to
     current_url: str | None = None  # What `git remote get-url <remote>` says now
@@ -57,6 +58,10 @@ def _project_dir(project_name: str) -> Path:
 def _status(project_dir: Path) -> GitPushStatus:
     target = git_sync.get_push_target(project_dir)
     remote = target["remote"] if target else "origin"
+    if not git_sync.is_git_repo(project_dir):
+        # The repo checks fail closed outside a repository; that is not unsafe config
+        return GitPushStatus(enabled=target is not None, is_git_repo=False, remote=remote,
+                             url=target["url"] if target else None)
     return GitPushStatus(
         enabled=target is not None,
         remote=remote,

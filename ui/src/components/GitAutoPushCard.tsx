@@ -21,7 +21,7 @@ interface GitAutoPushCardProps {
 export function GitAutoPushCard({ projectName }: GitAutoPushCardProps) {
   const { data: status, isLoading } = useGitPush(projectName)
   const update = useUpdateGitPush(projectName ?? '')
-  const changed = status?.enabled && status.url !== status.current_url
+  const changed = status?.enabled && status.is_git_repo && status.url !== status.current_url
 
   return (
     <Card>
@@ -54,7 +54,13 @@ export function GitAutoPushCard({ projectName }: GitAutoPushCardProps) {
               )}
             </div>
 
-            {status && (
+            {status && !status.is_git_repo && (
+              <p className="text-sm text-muted-foreground">
+                The project folder is not a git repository. Run <code>git init</code> and add a remote to use auto-push.
+              </p>
+            )}
+
+            {status?.is_git_repo && (
               <p className="text-sm">
                 <span className="text-muted-foreground">
                   {status.enabled ? 'Pushes go to' : `Remote "${status.remote ?? 'origin'}" points to`}:

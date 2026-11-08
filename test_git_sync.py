@@ -366,3 +366,24 @@ def test_api_enable_refuses_unsafe_config(api, repo: Path, remote: Path):
 
 def test_api_rejects_option_like_remote_name(api):
     assert api.put("/api/projects/demo/git-push", json={"enabled": True, "remote": "--upload-pack=x"}).status_code == 422
+
+
+def test_api_status_of_a_folder_without_git(tmp_path: Path, monkeypatch, settings_store):
+    """A project that is not a git repository is reported as such, not as unsafe git config."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.routers import git_push
+
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    monkeypatch.setattr(git_push, "_get_project_path", lambda name: folder)
+    app = FastAPI()
+    app.include_router(git_push.router)
+    status = TestClient(app).get("/api/projects/demo/git-push").json()
+    assert status["is_git_repo"] is False
+    assert status["unsafe_config"] == []
+
+
+def test_api_status_of_a_repo_says_it_is_one(api):
+    assert api.get("/api/projects/demo/git-push").json()["is_git_repo"] is True

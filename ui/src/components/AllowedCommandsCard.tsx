@@ -71,7 +71,7 @@ export function AllowedCommandsCard({ projectName }: AllowedCommandsCardProps) {
               onChange={(e) => setDraft(e.target.value)}
               placeholder={EXAMPLE}
               spellCheck={false}
-              className="font-mono text-sm min-h-[180px]"
+              className="font-mono text-sm min-h-[180px] max-h-[480px] overflow-y-auto"
             />
             {update.isError && (
               <Alert variant="destructive">

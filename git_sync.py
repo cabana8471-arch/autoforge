@@ -118,6 +118,12 @@ def get_push_target(project_dir: Path) -> dict | None:
     return None
 
 
+def is_git_repo(project_dir: Path) -> bool:
+    """Whether the project folder is inside a git work tree."""
+    inside = _git(project_dir, "rev-parse", "--is-inside-work-tree")
+    return inside.returncode == 0 and inside.stdout.strip() == "true"
+
+
 def find_unsafe_local_config(project_dir: Path) -> list[str]:
     """Repository-scoped config keys (local and worktree) outside the safe set.
 
@@ -200,8 +206,7 @@ def enable_auto_push(project_dir: Path, remote: str = "origin") -> dict:
     Raises:
         GitPushError: not a git repository, no such remote, or unsafe local config.
     """
-    inside = _git(project_dir, "rev-parse", "--is-inside-work-tree")
-    if inside.returncode != 0 or inside.stdout.strip() != "true":
+    if not is_git_repo(project_dir):
         raise GitPushError("The project folder is not a git repository")
     unsafe = find_unsafe_local_config(project_dir)
     if unsafe:
@@ -238,8 +243,7 @@ def push_current_branch(project_dir: Path) -> tuple[bool, str]:
 
     with _push_lock:
         try:
-            inside = _git(project_dir, "rev-parse", "--is-inside-work-tree")
-            if inside.returncode != 0 or inside.stdout.strip() != "true":
+            if not is_git_repo(project_dir):
                 return False, "not a git repository, skipping push"
 
             branch_res = _git(project_dir, "symbolic-ref", "--quiet", "--short", "HEAD")
