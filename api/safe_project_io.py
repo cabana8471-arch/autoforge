@@ -418,6 +418,21 @@ def read_project_file(project_dir: Path, target: Path) -> bytes:
             target is not a regular file with a single link
         OSError: the target is missing or unreadable
     """
+    with open_project_file_for_read(project_dir, target) as f:
+        return f.read()
+
+
+def open_project_file_for_read(project_dir: Path, target: Path) -> BinaryIO:
+    """Open ``target`` (below ``project_dir``) for streaming, with the checks of ``read_project_file``.
+
+    Returns:
+        A binary file the caller must close.
+
+    Raises:
+        UnsafeProjectPathError: outside the project, a symlinked component, or the
+            target is not a regular file with a single link
+        OSError: the target is missing or unreadable
+    """
     relative = _project_relative(project_dir, target)
     if DIR_FD_SUPPORTED:
         dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=False)
@@ -425,11 +440,14 @@ def read_project_file(project_dir: Path, target: Path) -> bytes:
             fd = _open_single_link_file(dir_fd, relative.name, os.O_RDONLY)
         finally:
             os.close(dir_fd)
-        with os.fdopen(fd, "rb") as f:
-            return f.read()
-    with open(_refuse_symlinks(project_dir, relative), "rb") as f:
+        return os.fdopen(fd, "rb")
+    f = open(_refuse_symlinks(project_dir, relative), "rb")
+    try:
         _refuse_hard_link(f.fileno(), project_dir / relative)
-        return f.read()
+    except BaseException:
+        f.close()
+        raise
+    return f
 
 
 def check_project_file(project_dir: Path, target: Path) -> bool:

@@ -237,17 +237,26 @@ def test_snapshot_and_log_downloads_refuse_links(
         asyncio.run(logs.download_export("demo", "logs_demo.jsonl"))
 
 
-def test_log_download_still_serves_a_real_export(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_log_download_streams_a_real_export(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Streamed from the safely opened descriptor (exports can be large), not loaded whole."""
+    from fastapi import FastAPI
+    from fastapi.responses import StreamingResponse
+    from fastapi.testclient import TestClient
+
     from server.routers import logs
 
     export = project / ".autocoder" / "exports" / "logs_demo.jsonl"
     export.parent.mkdir(parents=True)
-    export.write_text('{"m": 1}\n')
+    content = b'{"m": 1}\n' * 20_000  # several chunks
+    export.write_bytes(content)
     monkeypatch.setattr(logs, "_get_project_path", lambda _name: project)
 
-    response = asyncio.run(logs.download_export("demo", "logs_demo.jsonl"))
+    assert isinstance(asyncio.run(logs.download_export("demo", "logs_demo.jsonl")), StreamingResponse)
+    app = FastAPI()
+    app.include_router(logs.router)
+    response = TestClient(app).get("/api/logs/demo/download/logs_demo.jsonl")
 
-    assert response.body == b'{"m": 1}\n'
+    assert response.status_code == 200 and response.content == content
     assert response.headers["content-disposition"] == 'attachment; filename="logs_demo.jsonl"'
 
 

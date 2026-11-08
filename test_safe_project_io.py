@@ -400,6 +400,21 @@ def test_open_project_file_for_write_streams_and_keeps_target_on_error(root, out
     assert list(outside.iterdir()) == []
 
 
+@pytest.mark.parametrize("dir_fd", [True, False])
+def test_open_project_file_for_read_streams_and_refuses_links(root, outside, monkeypatch, dir_fd):
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", dir_fd)
+    (root / "log.jsonl").write_bytes(b"a\nb\n")
+    (outside / "secret").write_bytes(b"secret")
+    (root / "sym").symlink_to(outside / "secret")
+    os.link(outside / "secret", root / "hard")
+
+    with sio.open_project_file_for_read(root, root / "log.jsonl") as f:
+        assert f.read(2) == b"a\n" and f.read() == b"b\n"
+    for name in ("sym", "hard"):
+        with pytest.raises(sio.UnsafeProjectPathError):
+            sio.open_project_file_for_read(root, root / name)
+
+
 def test_read_project_text_normalizes_newlines_and_refuses_links(root, outside):
     (root / "a.md").write_bytes(b"one\r\ntwo\rthree\n")
     (root / "bad.md").write_bytes(b"caf\xe9")
