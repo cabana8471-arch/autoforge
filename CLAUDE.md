@@ -159,6 +159,20 @@ python -m pytest test_backlog_scheduling.py   # Backlog stays out of progress to
 python -m pytest test_git_sync.py             # Git auto-push: stored URL only, repo config allowlist (local + worktree), changed remote refused, hooks never run
 python -m pytest test_denied_commands_log.py  # Denied-commands log: kinds, no planted links followed, atomic .1 rotation, read-only for the agent
 python -m pytest test_denied_commands_api.py  # Denied-commands REST endpoints (list grouped, clear)
+python -m pytest test_assistant_agent_approval.py  # Assistant agent_start/agent_stop wait for the user's Approve click (WebSocket, timeout, reconnect)
+python -m pytest test_assistant_agent_tools.py     # Assistant agent control tools (status/start/stop/pause/resume)
+python -m pytest test_assistant_chat_session.py    # Assistant session: turn survives a closed panel, history resync
+python -m pytest test_assistant_database_timestamps.py  # Conversation timestamps sent as UTC with offset
+python -m pytest test_allowed_commands_editor.py   # Settings > Allowed Commands: validation, safe read/write, legacy file
+python -m pytest test_agent_completion.py test_orchestrator_completion.py  # No endless regression sessions once coding work is done
+python -m pytest test_orchestrator_rate_limit.py   # Orchestrator pauses while the usage limit is active
+python -m pytest test_feature_split.py             # feature_split tool, split depth limit
+python -m pytest test_chat_claude_md.py test_chat_sessions_no_shell.py test_chat_system_prompt.py  # Chat sessions: CLAUDE.md untouched, no shell, prompt via file
+python -m pytest test_claude_cli.py test_filesystem_paths.py test_filesystem_blocklist.py  # CLI discovery, typed folder paths, home under a blocked path
+python -m pytest test_mime_types.py test_process_utils.py test_start_ui.py  # MIME types, psutil race, start_ui.sh setups
+python -m pytest test_project_migration.py test_autocoder_config_path.py  # Legacy .autocoder migration (no links followed), config lookup
+python -m pytest test_security_hook_thread.py      # Security hook runs off the event loop
+python -m pytest test_project_refusal_responses.py test_report_paths.py  # Refused project paths answer 409; report paths
 ```
 
 ### React UI
@@ -167,9 +181,11 @@ python -m pytest test_denied_commands_api.py  # Denied-commands REST endpoints (
 cd ui
 npm run lint          # ESLint
 npm run build         # Type check + build (Vite 7)
-npm run test:e2e      # Playwright end-to-end tests
+npm run test:e2e      # Playwright end-to-end tests (need a running backend; see below)
 npm run test:e2e:ui   # Playwright tests with UI
 ```
+
+The e2e specs talk to a live backend (Vite proxies `/api` and `/ws`, WebSockets included, to `VITE_API_PORT`, default 8888). Run the server with its own `HOME` so the real registry is untouched. `e2e/import-and-backlog.spec.ts` creates its projects through the API in `E2E_PROJECTS_DIR` (an absolute folder outside `/tmp`) and skips without it; the assistant specs need at least one registered project and a working Claude CLI.
 
 ### CI/CD
 
@@ -216,7 +232,6 @@ Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publi
 - `billing_utils.py` - Spend safeguards: billing-error detection (agents stop instead of retrying, exit code 3), `AUTOFORGE_MAX_BUDGET_USD` run cap (exit code 4); the orchestrator sums its run's `agent_usage` rows, never agent output
 - `git_sync.py` - Opt-in per-project auto-push after successful coding sessions: pushes only to the remote URL stored when the user enabled it, refuses on a changed remote or any repo-scoped git config key (local + worktree) outside a safe allowlist, hooks disabled, never forces (`server/routers/git_push.py`, Settings > Version Control)
 - `project_skills.py` - Skill library (bundled + `~/.autoforge/skills/`) and per-project skill install/remove
-- `git_sync.py` - Optional auto-push of the project's current branch to its git remote after each successful coding session (`git_auto_push` setting / `AUTOFORGE_GIT_AUTO_PUSH`)
 - `api/database.py` - SQLAlchemy models (Feature, Schedule, ScheduleOverride)
 - `api/test_evidence.py` - Test evidence normalization; screenshots copied to `.autoforge/evidence/feature_<id>/`, shown in the feature modal
 - `api/safe_project_io.py` - Reads/writes project files from outside the agent sandbox without following agent-planted symlinks or hard links (dir_fd + O_NOFOLLOW walk, atomic replace); the `*_project_*` helpers (write/append/create-exclusive/mkdirs/read/copy-tree/unlink/remove-tree) raise `OSError` and fall back to a path-based symlink check without dir_fd (Windows). Settings files, configs, lock/drain files, scaffolding, prompt migrations and the layout migration write through them
@@ -251,6 +266,9 @@ The FastAPI server provides REST and WebSocket endpoints for the UI:
 - `settings.py` - Global settings management (model selection, YOLO, batch size, headless browser)
 - `knowledge.py` - Upload/list/read/delete project knowledge documents (`.autoforge/knowledge/*.md`)
 - `skills.py` - Skill library listing and per-project skill install/remove
+- `allowed_commands.py` - Read/save the project allowlist `.autoforge/allowed_commands.yaml` (Settings > Allowed Commands), validated with the security hook's rules
+- `git_push.py` - Per-project git auto-push opt-in (Settings > Version Control)
+- `import_project.py` - Analyze an existing codebase for the import wizard (stack detection, AutoForge folder detection)
 - `github.py` - Import GitHub issues as features (repo auto-detected from git remote; token from `GITHUB_TOKEN`/`GH_TOKEN` or `gh auth token`)
 
 **Services** (`server/services/`):
@@ -260,7 +278,8 @@ The FastAPI server provides REST and WebSocket endpoints for the UI:
 - `scheduler_service.py` - APScheduler-based automated agent scheduling
 - `dev_server_manager.py` - Dev server lifecycle management
 - `assistant_chat_session.py` / `assistant_database.py` - Assistant chat sessions with SQLite persistence
-- `assistant_agent_tools.py` - In-process MCP server giving the assistant agent control tools (status/start/stop/pause/resume)
+- `assistant_agent_tools.py` - In-process MCP server giving the assistant agent control tools (status/start/stop/pause/resume); start and stop run only after the user's Approve click
+- `agent_action_approvals.py` - Pending Approve/Decline requests of an assistant session; only an `agent_action_decision` WebSocket message from the browser resolves one (5 min timeout = declined)
 - `spec_chat_session.py` - Spec creation chat sessions
 - `expand_chat_session.py` - Expand project chat sessions
 - `chat_constants.py` - Shared constants for chat services
@@ -481,7 +500,7 @@ blocked_commands:
 - `rm` targets must resolve inside the project directory (blocks `/`, `~`, `.`, `..`, `$VAR`, `{a,b}` brace expansion, bare `*` at the project root, and paths escaping the project, including via symlinks followed by a trailing slash or glob)
 - Commands after a newline, inside `$(...)` or backticks (also within double quotes and unquoted heredocs) and in `bash -c` / `sh -c` payloads (also `-lc`, `env bash -c`) are validated like top-level commands; quoted heredoc bodies and single-quoted text are data
 - Org-level blocked commands cannot be overridden by project configs
-- Only the user edits `.autoforge/allowed_commands.yaml`: the agent settings deny the file tools on it (`Edit(//<abs path>)`), `sandbox.filesystem.denyWrite` makes it read-only for Bash, and the Bash hook refuses commands that would change it (spec chat sessions deny it too)
+- Only the user edits `.autoforge/allowed_commands.yaml` (by hand or in Settings > Allowed Commands, which refuses blocklisted names with the reason): the agent settings deny the file tools on it (`Edit(//<abs path>)`), `sandbox.filesystem.denyWrite` makes it read-only for Bash, and the Bash hook refuses commands that would change it (spec chat sessions deny it too)
 
 **Files:**
 - `security.py` - Command validation logic and hardcoded blocklist

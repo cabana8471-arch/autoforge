@@ -9,6 +9,63 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Fork documentation (FORK_README.md, FORK_CHANGELOG.md)
 - Configuration system via `.autocoder/config.json`
 
+## [2026-11-08] Integration of the zwanski-start upstream PRs
+
+GitHub user `zwanski-start` opened 92 PRs on the unmaintained upstream `AutoForgeAI/autoforge`
+(22 and 27.10.2026); none were merged there. 54 of them were integrated here, one commit per PR
+with the original author kept (`mohamed zwanski <mohaaibb4@gmail.com>`) and the trailer
+`Integrates AutoForgeAI/autoforge#<PR>`. Each diff was read before integration and adapted where
+needed; fixes found on the way are separate commits by the fork maintainer. Skipped by decision:
+#320 (OIDC sign-in) and #290 (i18n). The competing variant of each issue (34 PRs) was not merged;
+a few small pieces were ported from #307, #317, #318, #322 and #255.
+
+### Defects and security (Phase 1, merged into my-features first)
+- #294 SDK alignment (system prompt preset, result/system messages, `rm` validation)
+- #316 + #307 chat system prompts via `--system-prompt-file`; the user's `CLAUDE.md` is no longer overwritten
+- #273 features created from the expand chat are reported (also from FastMCP-wrapped results)
+- #334 quality gates before `feature_mark_passing` (env-only configuration, off by default)
+- #298 no shell in the web spec chat
+- Own: bash allowlist parser hardened (newlines, `$()`, backticks, `bash -c` payloads, quote-adjacent operators); npm `files` guard test
+
+### Bug fixes (Phase 2)
+- #256 MIME types, #296 no endless regression sessions, #299 typed folder paths + hidden folders,
+  #301 pause on usage limit, #300 persisted regression count, #306 stuck-queue explanation,
+  #254 stale-read Write/Edit loop guard, #257 security hook off the event loop, #263 `feature_split`,
+  #268 WAL fallback, #270 WebFetch/WebSearch in the expand chat, #275 model tier overrides on
+  alternative APIs, #332 assistant survives a closed panel, #336 UTF-8 subprocess pipes,
+  #341 home under a blocked path, #287 psutil race, #288 `start_ui.sh` with pip-only/uv,
+  #292 legacy `.autocoder` migration (never follows links), #304 Python behind Windows shims
+- Own: project name pattern in the New Project dialog, assistant history timestamps in local time
+
+### Docs and prompts (Phase 3)
+- #291, #335, #327, #285, #276 (AutoForge files out of the project root), #289 validation
+  screenshots in `.autoforge/validation/`, #283 scripted regression tests, #333 command-line
+  verification for non-web projects (prompt migrations v2-v4)
+
+### Features (Phases 4-6)
+- Agent flow and projects: #245 Manual Testing lane, #305 edit/reopen completed features,
+  #339 separate testing model, #331 assistant bug reports, #323 spec conversation transcript,
+  #264 test evidence, #321 live browser view, #315 re-register existing project folders,
+  #303 onboarding of existing codebases
+- Providers and cost: #241 GLM 4.x, #272 Gemini via LiteLLM, #308 Kimi Code / Moonshot,
+  #259 token/cost tracking and per-project cost limit, #311 assistant agent controls,
+  #286 billing-error stop and spending cap
+- Large: #302 knowledge documents, #314 per-project skills (library without `~/.claude/skills`),
+  #313 GitHub issue import (comments off by default), #326 Backlog lane and maturity tags,
+  #282 per-project git auto-push to a stored URL, #267 denied-commands log
+- Own: `features.db` read-only for the agent; GitHub issues by external authors need an explicit,
+  content-bound confirmation
+
+### Added in Phase 7 (QA and merge)
+- The assistant's `agent_start`/`agent_stop` wait for the user's Approve click in the panel
+  (server-side; a chat answer is not an approval; 5 minutes without an answer = declined)
+- Settings > Allowed Commands: edit `.autoforge/allowed_commands.yaml` in the UI, validated with
+  the security hook's rules
+- e2e: re-registering a project and the Backlog lane; the assistant and tooltip specs, which had
+  silently skipped since the `neo-*` classes were removed, run again
+- Fixed: a project without git was shown as having unsafe git config; the Vite dev proxy did not
+  forward WebSockets under `/api`
+
 ## [2025-01-25] Infrastructure Features & Mock Data Prevention
 
 ### Problem Addressed
