@@ -65,6 +65,10 @@ a few small pieces were ported from #307, #317, #318, #322 and #255.
   silently skipped since the `neo-*` classes were removed, run again
 - Fixed: a project without git was shown as having unsafe git config; the Vite dev proxy did not
   forward WebSockets under `/api`
+- Fixed after the branch review: the assistant and the expand chat could read any file on disk
+  (bypass mode plus bare `Read`); they now read only inside the project. Agents can no longer
+  mark Backlog or Manual Testing features passing; a second assistant tab no longer orphans the
+  approval prompt; the allowlist editor refuses blank command names
 
 ## [2025-01-25] Infrastructure Features & Mock Data Prevention
 
