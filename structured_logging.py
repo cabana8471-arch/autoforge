@@ -104,6 +104,18 @@ class StructuredLogEntry:
 
 _INIT_LOCK_RETRIES = 10
 
+# One write lock per logs.db, shared by every handler in this process. Handlers with
+# their own locks race each other inside SQLite and drop records on "database is locked".
+_DB_WRITE_LOCKS: dict[str, threading.Lock] = {}
+_DB_WRITE_LOCKS_GUARD = threading.Lock()
+
+
+def _write_lock_for(db_path: Path) -> threading.Lock:
+    """Return the process-wide write lock for a logs database."""
+    key = str(Path(db_path).resolve())
+    with _DB_WRITE_LOCKS_GUARD:
+        return _DB_WRITE_LOCKS.setdefault(key, threading.Lock())
+
 
 def _init_log_database(db_path: Path) -> None:
     """Create the logs table and indexes, retrying while another process initializes them.
@@ -200,7 +212,7 @@ class StructuredLogHandler(logging.Handler):
         self.db_path = db_path
         self.agent_id = agent_id
         self.max_entries = max_entries
-        self._lock = threading.Lock()
+        self._lock = _write_lock_for(db_path)
         self._insert_count = 0
         self._cleanup_interval = 100  # Run cleanup every N inserts
         self._init_database()

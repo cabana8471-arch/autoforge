@@ -400,6 +400,27 @@ class TestThreadSafety(TestCase):
         expected = num_threads * logs_per_thread
         self.assertEqual(total, expected)
 
+    def test_loggers_of_one_project_serialize_their_writes(self):
+        """A second logger waits for the first one's write instead of racing it in SQLite.
+
+        Racing writers hit "database is locked" under load and the record is dropped
+        (seen as 497-499 of 500 rows in test_concurrent_writes on a busy machine).
+        """
+        import threading
+
+        first = get_logger(self.project_dir, agent_id="first", console_output=False)
+        second = get_logger(self.project_dir, agent_id="second", console_output=False)
+
+        with first.handler._lock:  # first logger is mid-write
+            writer = threading.Thread(target=second.info, args=("queued",))
+            writer.start()
+            writer.join(timeout=0.3)
+            self.assertTrue(writer.is_alive(), "second logger wrote while the first held the db")
+        writer.join(timeout=5)
+
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(get_log_query(self.project_dir).count(), 1)
+
     def test_concurrent_read_write(self):
         """Test that reads and writes can happen concurrently."""
         logger = get_logger(self.project_dir, agent_id="writer", console_output=False)
