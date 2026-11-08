@@ -4,6 +4,7 @@ import { useSkipFeature, useDeleteFeature, useFeatures, useResolveHumanInput, us
 import { EditFeatureForm } from './EditFeatureForm'
 import { HumanInputForm } from './HumanInputForm'
 import { TestEvidencePanel } from './TestEvidencePanel'
+import { FeatureBrowserPreview } from './FeatureBrowserPreview'
 import type { Feature } from '../lib/types'
 import {
   Dialog,
@@ -42,9 +43,10 @@ interface FeatureModalProps {
   feature: Feature
   projectName: string
   onClose: () => void
+  onOpenBrowsersView?: () => void
 }
 
-export function FeatureModal({ feature, projectName, onClose }: FeatureModalProps) {
+export function FeatureModal({ feature, projectName, onClose, onOpenBrowsersView }: FeatureModalProps) {
   const [error, setError] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
@@ -188,6 +190,11 @@ export function FeatureModal({ feature, projectName, onClose }: FeatureModalProp
               Priority: #{feature.priority}
             </span>
           </div>
+
+          {/* Live browser of any agent working on / testing this feature */}
+          {onOpenBrowsersView && (
+            <FeatureBrowserPreview featureId={feature.id} onOpenBrowsersView={onOpenBrowsersView} />
+          )}
 
           {/* Human Input Request */}
           {feature.needs_human_input && feature.human_input_request && (
