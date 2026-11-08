@@ -147,7 +147,8 @@ class _EvidenceWriter:
                 self.unsafe = True
                 return None
             safe_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, safe_dir / name)
+            # Refuses a hard link: the copy would serve an outside file's content
+            safe_project_io.copy2_refusing_hard_links(str(source), str(safe_dir / name))
             return safe_dir / name
 
         if not self._opened:

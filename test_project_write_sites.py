@@ -426,6 +426,20 @@ def test_layout_migration_does_not_copy_linked_prompt_contents(project: Path, ou
     assert copied.is_symlink()  # the link itself, never the outside file's contents
 
 
+def test_layout_migration_does_not_launder_hard_linked_prompt(project: Path, outside: Path) -> None:
+    import os
+
+    (outside / "secret.md").write_text("OUTSIDE SECRET")
+    (project / "prompts").mkdir()
+    (project / "prompts" / "app_spec.txt").write_text("spec")
+    os.link(outside / "secret.md", project / "prompts" / "coding_prompt.md")
+
+    assert autoforge_paths.migrate_project_layout(project) == []  # refused (logged), retried next start
+
+    assert not (project / ".autoforge" / "prompts").exists()
+    assert (project / "prompts" / "coding_prompt.md").exists()  # nothing moved or deleted
+
+
 # ---------------------------------------------------------------------------
 # Scaffolding and prompt migrations (prompts.py)
 # ---------------------------------------------------------------------------

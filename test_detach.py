@@ -1671,6 +1671,20 @@ class TestPlantedLinks(unittest.TestCase):
         self.assertEqual((self.project_dir / "features.db").read_bytes(), b"db")
         self.assertEqual(self._outside_names(), {"id_rsa"})
 
+    def test_backup_refuses_hard_linked_file(self):
+        """The backup copy would have one link: reattach would bring the outside content back as a plain file."""
+        import os
+
+        (self.project_dir / ".autoforge").mkdir()
+        os.link(self.outside / "id_rsa", self.project_dir / ".autoforge" / "test-x.json")
+        files = detach.get_autoforge_files(self.project_dir)
+
+        with self.assertRaises(OSError):
+            detach.create_backup(self.project_dir, "test", files)
+
+        self.assertTrue((self.project_dir / ".autoforge" / "test-x.json").exists())
+        self.assertFalse((self.project_dir / detach.BACKUP_DIR).exists())
+
     def test_backup_keeps_nested_pattern_matches_and_deletes_originals(self):
         (self.project_dir / ".autoforge").mkdir()
         (self.project_dir / ".autoforge" / "test-login.json").write_text("{}")

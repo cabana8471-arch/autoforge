@@ -111,7 +111,9 @@ def open_regular_file(root: Path, relative: Path) -> int | None:
     Returns:
         A read-only file descriptor the caller must close (e.g. via os.fdopen),
         or None when any component is a symlink or the target is not a regular
-        file (FIFOs and devices are refused without blocking).
+        file (FIFOs and devices are refused without blocking) with a single link:
+        a copy of a hard-linked file would carry the outside file's content under
+        a fresh, single-link name that every later check accepts.
     """
     dir_fd = open_dir(root, relative.parts[:-1])
     if dir_fd is None:
@@ -122,7 +124,8 @@ def open_regular_file(root: Path, relative: Path) -> int | None:
         return None
     finally:
         os.close(dir_fd)
-    if not stat.S_ISREG(os.fstat(fd).st_mode):
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
         os.close(fd)
         return None
     return fd
@@ -212,6 +215,30 @@ def refuse_nested_junctions(directory: str, names: list[str]) -> list[str]:
         if _reparse_tag(Path(directory) / name) == _IO_REPARSE_TAG_MOUNT_POINT:
             raise UnsafeProjectPathError(f"{Path(directory) / name} is a junction")
     return []
+
+
+def copy2_refusing_hard_links(src: str, dst: str, *, follow_symlinks: bool = True) -> str:
+    """``shutil.copy2`` for ``copytree(copy_function=...)``: refuse a source with a second link.
+
+    A copy has a single link, so a hard link the agent planted to an outside file
+    would come out of the copy as a plain project file. ``copytree(symlinks=True)``
+    hands only regular files to the copy function; the source is opened without
+    following a symlink and checked on the open descriptor.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(src, flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+            raise UnsafeProjectPathError(f"{src} is not a regular file with a single link")
+        with os.fdopen(os.dup(fd), "rb") as source, open(dst, "xb") as target:
+            shutil.copyfileobj(source, target)
+        # Same metadata as shutil.copy2: permission bits and timestamps
+        os.chmod(dst, stat.S_IMODE(st.st_mode))
+        os.utime(dst, ns=(st.st_atime_ns, st.st_mtime_ns))
+    finally:
+        os.close(fd)
+    return dst
 
 
 def _refuse_symlinks(project_dir: Path, relative: Path) -> Path:
@@ -542,8 +569,11 @@ def _copy_entry_at(src_dir: int, name: str, dst_dir: int, dst_name: str) -> None
     elif stat.S_ISREG(st.st_mode):
         src_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=src_dir)
         try:
-            if not stat.S_ISREG(os.fstat(src_fd).st_mode):  # swapped since the lstat
+            src_st = os.fstat(src_fd)
+            if not stat.S_ISREG(src_st.st_mode):  # swapped since the lstat
                 raise UnsafeProjectPathError(f"{name!r} is not a regular file")
+            if src_st.st_nlink > 1:  # the copy would launder an outside file into the project
+                raise UnsafeProjectPathError(f"{name!r} has more than one hard link")
             dst_fd = os.open(dst_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dst_dir)
             with os.fdopen(dst_fd, "wb") as dst, os.fdopen(os.dup(src_fd), "rb") as src:
                 shutil.copyfileobj(src, dst)
@@ -585,9 +615,12 @@ def copy_project_entry(project_dir: Path, source: Path, target: Path) -> None:
             if src_path.is_symlink():
                 tmp_path.symlink_to(os.readlink(src_path))
             elif src_path.is_dir():
-                shutil.copytree(src_path, tmp_path, symlinks=True, ignore=refuse_nested_junctions)
+                shutil.copytree(
+                    src_path, tmp_path, symlinks=True, ignore=refuse_nested_junctions,
+                    copy_function=copy2_refusing_hard_links,
+                )
             else:
-                shutil.copy2(src_path, tmp_path)
+                copy2_refusing_hard_links(str(src_path), str(tmp_path))
             if dst_path.is_dir() and not dst_path.is_symlink():
                 shutil.rmtree(dst_path)
             elif tmp_path.is_dir() and not tmp_path.is_symlink():

@@ -75,6 +75,44 @@ def test_open_regular_file_refuses_non_regular(root):
     assert sio.open_regular_file(root, Path("pipe.png")) is None  # must not block on a FIFO
 
 
+def test_open_regular_file_refuses_hard_link(root, outside):
+    (outside / "secret.png").write_bytes(b"secret")
+    os.link(outside / "secret.png", root / "hard.png")
+    assert sio.open_regular_file(root, Path("hard.png")) is None
+
+
+@pytest.mark.parametrize("dir_fd", [True, False])
+def test_copies_refuse_hard_linked_sources(root, outside, monkeypatch, dir_fd):
+    """A copy has a single link: copying a hard link would launder an outside file."""
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", dir_fd)
+    (outside / "secret").write_bytes(b"secret")
+    (root / "tree").mkdir()
+    (root / "tree" / "ok.txt").write_bytes(b"ok")
+    os.link(outside / "secret", root / "tree" / "hard.txt")
+
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.copy_project_entry(root, root / "tree" / "hard.txt", root / "copy.txt")
+    with pytest.raises(OSError):  # shutil.Error from copytree in the path fallback
+        sio.copy_project_entry(root, root / "tree", root / "copy")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.copy2_refusing_hard_links(str(root / "tree" / "hard.txt"), str(root / "c.txt"))
+
+    assert not (root / "copy.txt").exists() and not (root / "copy").exists() and not (root / "c.txt").exists()
+    assert [p.name for p in root.iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_copy2_refusing_hard_links_copies_like_copy2(root):
+    (root / "run.sh").write_bytes(b"#!/bin/sh\n")
+    os.chmod(root / "run.sh", 0o755)
+    os.utime(root / "run.sh", (1_000_000, 1_000_000))
+
+    assert sio.copy2_refusing_hard_links(str(root / "run.sh"), str(root / "copy.sh")) == str(root / "copy.sh")
+
+    assert (root / "copy.sh").read_bytes() == b"#!/bin/sh\n"
+    assert os.stat(root / "copy.sh").st_mode & 0o777 == 0o755
+    assert int(os.stat(root / "copy.sh").st_mtime) == 1_000_000
+
+
 def test_write_file_creates_dirs_and_replaces(root):
     assert sio.write_file(root, Path(".autoforge/prompts/out.md"), b"one")
     assert sio.write_file(root, Path(".autoforge/prompts/out.md"), b"two")
