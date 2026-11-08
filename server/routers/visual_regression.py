@@ -20,9 +20,10 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from api.safe_project_io import read_project_file, read_project_text, unlink_project_file
 from registry import get_project_path
 from visual_regression import (
     Viewport,
@@ -268,8 +269,7 @@ async def list_reports(project_name: str):
     reports = []
     for report_file in sorted(reports_dir.glob("visual_test_*.json"), reverse=True):
         try:
-            with open(report_file) as f:
-                data = json.load(f)
+            data = json.loads(read_project_text(project_dir, report_file))
 
             summary = data.get("summary", {})
             reports.append(
@@ -304,8 +304,7 @@ async def get_report(project_name: str, filename: str):
         raise HTTPException(status_code=404, detail=f"Report not found: {filename}")
 
     try:
-        with open(report_path) as f:
-            return json.load(f)
+        return json.loads(read_project_text(project_dir, report_path))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading report: {e}")
 
@@ -393,7 +392,12 @@ async def get_snapshot(project_name: str, snapshot_type: str, filename: str):
     if not snapshot_path.exists():
         raise HTTPException(status_code=404, detail=f"Snapshot not found: {filename}")
 
-    return FileResponse(snapshot_path, media_type="image/png")
+    try:
+        # Read without following a link the agent planted (FileResponse would follow it)
+        content = read_project_file(project_dir, snapshot_path)
+    except OSError:
+        raise HTTPException(status_code=500, detail=f"Snapshot is not readable: {filename}")
+    return Response(content, media_type="image/png")
 
 
 @router.delete("/reports/{project_name}/{filename}")
@@ -413,7 +417,7 @@ async def delete_report(project_name: str, filename: str):
         raise HTTPException(status_code=404, detail=f"Report not found: {filename}")
 
     try:
-        report_path.unlink()
+        unlink_project_file(project_dir, report_path)
         return {"deleted": True, "filename": filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting report: {e}")

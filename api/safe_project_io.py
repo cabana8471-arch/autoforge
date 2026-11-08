@@ -349,6 +349,20 @@ def read_project_file(project_dir: Path, target: Path) -> bytes:
     return _refuse_symlinks(project_dir, relative).read_bytes()
 
 
+def read_project_text(project_dir: Path, target: Path, errors: str = "strict") -> str:
+    """``read_project_file`` decoded as UTF-8, newlines normalized like ``Path.read_text``.
+
+    For project files whose content is sent to an agent prompt or to the UI: a
+    planted symlink or hard link would otherwise send a file from outside the project.
+
+    Raises:
+        OSError: as ``read_project_file``
+        UnicodeDecodeError: the content is not UTF-8 (with ``errors="strict"``)
+    """
+    text = read_project_file(project_dir, target).decode("utf-8", errors=errors)
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def copy_tree_into_project(project_dir: Path, source_dir: Path, target: Path) -> None:
     """Copy the trusted directory ``source_dir`` (outside the project) to ``target``.
 

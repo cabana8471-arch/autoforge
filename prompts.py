@@ -17,6 +17,7 @@ from api.safe_project_io import (
     copy_tree_into_project,
     make_project_dirs,
     read_project_file,
+    read_project_text,
     write_project_file,
 )
 
@@ -27,14 +28,9 @@ TEMPLATES_DIR = Path(__file__).parent / ".claude" / "templates"
 CURRENT_MIGRATION_VERSION = 4
 
 # Scaffolding and migrations run outside the agent's sandbox: every project file
-# they write, append to or copy goes through api.safe_project_io, so a symlink or
-# hard link the agent planted in the project is never followed out of it.
-
-
-def _read_project_text(project_dir: Path, path: Path) -> str:
-    """Read a project text file without following links (newlines normalized like read_text)."""
-    text = read_project_file(project_dir, path).decode("utf-8")
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+# they write, append to, copy, or read into an agent prompt goes through
+# api.safe_project_io, so a symlink or hard link the agent planted in the project
+# is never followed out of it.
 
 
 def get_project_prompts_dir(project_dir: Path) -> Path:
@@ -67,7 +63,7 @@ def load_prompt(name: str, project_dir: Path | None = None) -> str:
         project_path = project_prompts / f"{name}.md"
         if project_path.exists():
             try:
-                return project_path.read_text(encoding="utf-8")
+                return read_project_text(project_dir, project_path)
             except (OSError, PermissionError) as e:
                 print(f"Warning: Could not read {project_path}: {e}")
 
@@ -461,7 +457,7 @@ def get_app_spec(project_dir: Path) -> str:
     spec_path = project_prompts / "app_spec.txt"
     if spec_path.exists():
         try:
-            return spec_path.read_text(encoding="utf-8")
+            return read_project_text(project_dir, spec_path)
         except (OSError, PermissionError) as e:
             raise FileNotFoundError(f"Could not read {spec_path}: {e}") from e
 
@@ -469,7 +465,7 @@ def get_app_spec(project_dir: Path) -> str:
     legacy_spec = project_dir / "app_spec.txt"
     if legacy_spec.exists():
         try:
-            return legacy_spec.read_text(encoding="utf-8")
+            return read_project_text(project_dir, legacy_spec)
         except (OSError, PermissionError) as e:
             raise FileNotFoundError(f"Could not read {legacy_spec}: {e}") from e
 
@@ -1069,7 +1065,7 @@ def _migrate_v0_to_v1(project_dir: Path) -> list[str]:
     coding_prompt_path = prompts_dir / "coding_prompt.md"
     if coding_prompt_path.exists():
         try:
-            content = _read_project_text(project_dir, coding_prompt_path)
+            content = read_project_text(project_dir, coding_prompt_path)
             if "Playwright MCP" in content or "browser_navigate" in content or "browser_take_screenshot" in content:
                 updated = _migrate_coding_prompt_to_cli(content)
                 if updated != content:
@@ -1082,7 +1078,7 @@ def _migrate_v0_to_v1(project_dir: Path) -> list[str]:
     testing_prompt_path = prompts_dir / "testing_prompt.md"
     if testing_prompt_path.exists():
         try:
-            content = _read_project_text(project_dir, testing_prompt_path)
+            content = read_project_text(project_dir, testing_prompt_path)
             if "browser_navigate" in content or "browser_take_screenshot" in content:
                 updated = _migrate_testing_prompt_to_cli(content)
                 if updated != content:
@@ -1139,7 +1135,7 @@ def _migrate_v2_to_v3(project_dir: Path) -> list[str]:
         if prompt_path.is_symlink() or not prompt_path.exists():
             continue
         try:
-            content = _read_project_text(project_dir, prompt_path)
+            content = read_project_text(project_dir, prompt_path)
             updated = _apply_replacements(content, replacements)
             if updated != content:
                 write_project_file(project_dir, prompt_path, updated.encode("utf-8"))
@@ -1229,7 +1225,7 @@ def _migrate_v3_to_v4(project_dir: Path) -> list[str]:
     if testing_prompt_path.is_symlink() or not testing_prompt_path.exists():
         return migrated
     try:
-        content = _read_project_text(project_dir, testing_prompt_path)
+        content = read_project_text(project_dir, testing_prompt_path)
         updated = _migrate_testing_prompt_to_v4(content)
         if updated != content:
             write_project_file(project_dir, testing_prompt_path, updated.encode("utf-8"))

@@ -33,7 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from api.safe_project_io import write_project_file
+from api.safe_project_io import read_project_text, write_project_file
 from autoforge_paths import get_review_reports_dir
 
 logger = logging.getLogger(__name__)
@@ -198,7 +198,7 @@ class ReviewAgent:
                 continue
 
             try:
-                content = file_path.read_text(errors="ignore")
+                content = read_project_text(self.project_dir, file_path, errors="ignore")
 
                 if file_path.suffix == ".py":
                     self._review_python_file(file_path, content)

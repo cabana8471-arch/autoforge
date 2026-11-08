@@ -417,7 +417,8 @@ async def get_project_prompts(name: str):
         filepath = prompts_dir / filename
         if filepath.exists():
             try:
-                return filepath.read_text(encoding="utf-8")
+                from api.safe_project_io import read_project_text
+                return read_project_text(project_dir, filepath)  # never through a planted link
             except Exception:
                 return ""
         return ""

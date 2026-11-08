@@ -9,6 +9,7 @@ Run with: python -m pytest test_test_evidence.py -v
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -399,6 +400,14 @@ class TestApi:
         _set_evidence(session_maker, 2, {"screenshots": [".playwright-cli/page.png"]})
         assert client.get("/api/projects/proj/features/2/evidence/screenshots/1").status_code == 404
         assert client.get("/api/projects/proj/features/1/evidence/screenshots/0").status_code == 404
+
+    def test_hard_linked_screenshot_is_not_served(self, client, session_maker, project_dir, tmp_path):
+        outside = tmp_path / "secret.png"
+        outside.write_bytes(PNG_BYTES)
+        (project_dir / ".playwright-cli").mkdir()
+        os.link(outside, project_dir / ".playwright-cli" / "hard.png")
+        _set_evidence(session_maker, 2, {"screenshots": [".playwright-cli/hard.png"]})
+        assert client.get("/api/projects/proj/features/2/evidence/screenshots/0").status_code == 404
 
     def test_tampered_path_is_not_served(self, client, session_maker, project_dir, tmp_path):
         outside = tmp_path / "secret.png"

@@ -104,7 +104,9 @@ def get_system_prompt(project_name: str, project_dir: Path) -> str:
     app_spec_path = get_prompts_dir(project_dir) / "app_spec.txt"
     if app_spec_path.exists():
         try:
-            app_spec_content = app_spec_path.read_text(encoding="utf-8")
+            from api.safe_project_io import read_project_text
+            # Goes into the prompt: never read through a link the agent planted
+            app_spec_content = read_project_text(project_dir, app_spec_path)
             # Truncate if too long
             if len(app_spec_content) > 5000:
                 app_spec_content = app_spec_content[:5000] + "\n... (truncated)"

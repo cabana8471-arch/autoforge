@@ -20,6 +20,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from api.safe_project_io import read_project_text, unlink_project_file
 from registry import get_project_path
 from review_agent import ReviewAgent
 
@@ -249,8 +250,7 @@ def list_reports(project_name: str):
     reports = []
     for report_file in sorted(reports_dir.glob("review_*.json"), reverse=True):
         try:
-            with open(report_file) as f:
-                data = json.load(f)
+            data = json.loads(read_project_text(project_dir, report_file))
 
             summary = data.get("summary", {})
             by_severity = summary.get("by_severity", {})
@@ -287,8 +287,7 @@ def get_report(project_name: str, filename: str):
         raise HTTPException(status_code=404, detail=f"Report not found: {filename}")
 
     try:
-        with open(report_path) as f:
-            return json.load(f)
+        return json.loads(read_project_text(project_dir, report_path))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading report: {e}")
 
@@ -379,7 +378,7 @@ def delete_report(project_name: str, filename: str):
         raise HTTPException(status_code=404, detail=f"Report not found: {filename}")
 
     try:
-        report_path.unlink()
+        unlink_project_file(project_dir, report_path)
         return {"deleted": True, "filename": filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting report: {e}")

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal, Optional, cast
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -315,8 +315,15 @@ async def download_export(project_name: str, filename: str):
     if not export_path.exists():
         raise HTTPException(status_code=404, detail="Export file not found")
 
-    return FileResponse(
-        path=export_path,
-        filename=filename,
-        media_type="application/octet-stream",
-    )
+    from urllib.parse import quote
+
+    from api.safe_project_io import read_project_file
+    try:
+        # Read without following a link the agent planted (FileResponse would follow it)
+        content = read_project_file(project_dir, export_path)
+    except OSError:
+        raise HTTPException(status_code=500, detail="Export file is not readable")
+    # Same Content-Disposition as FileResponse(filename=...)
+    quoted = quote(filename)
+    disposition = f"attachment; filename*=utf-8''{quoted}" if quoted != filename else f'attachment; filename="{filename}"'
+    return Response(content, media_type="application/octet-stream", headers={"Content-Disposition": disposition})

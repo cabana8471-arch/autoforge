@@ -249,7 +249,8 @@ async def get_workflow_content(project_name: str, filename: str):
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     try:
-        content = workflow_path.read_text()
+        from api.safe_project_io import read_project_text
+        content = read_project_text(project_dir, workflow_path)  # never through a planted link
         return {
             "filename": filename,
             "content": content,

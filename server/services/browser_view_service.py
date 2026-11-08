@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from api.safe_project_io import unlink_project_file
+from api.safe_project_io import read_project_file, unlink_project_file
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +220,8 @@ class BrowserViewService:
                 session.consecutive_failures += 1
                 return
 
-            image_bytes = screenshot_path.read_bytes()
+            # Sent to the UI: never read through a link the agent planted
+            image_bytes = read_project_file(self.project_dir, screenshot_path)
             image_base64 = base64.b64encode(image_bytes).decode("ascii")
 
             # Reset failure counter on success

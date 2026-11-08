@@ -18,6 +18,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from api.safe_project_io import read_project_text
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/security", tags=["security"])
@@ -181,8 +183,7 @@ async def get_report(project_name: str, filename: str):
         raise HTTPException(status_code=404, detail="Report not found")
 
     try:
-        with open(report_path) as f:
-            return json.load(f)
+        return json.loads(read_project_text(project_dir, report_path))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading report: {str(e)}")
 
@@ -205,7 +206,6 @@ async def get_latest_report(project_name: str):
         raise HTTPException(status_code=404, detail="No reports found")
 
     try:
-        with open(reports[0]) as f:
-            return json.load(f)
+        return json.loads(read_project_text(project_dir, reports[0]))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading report: {str(e)}")

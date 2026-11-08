@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from typing import TypedDict
 
-from api.safe_project_io import unlink_project_file, write_project_file
+from api.safe_project_io import read_project_text, unlink_project_file, write_project_file
 
 # Python 3.11+ has tomllib in the standard library
 try:
@@ -124,8 +124,8 @@ def _load_config(project_dir: Path) -> dict:
         return {}
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = json.load(f)
+        # Shown in the UI and run as the dev command: never read through a planted link
+        config = json.loads(read_project_text(project_dir, config_path))
 
         if not isinstance(config, dict):
             logger.warning(

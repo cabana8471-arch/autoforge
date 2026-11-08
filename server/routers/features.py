@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 from ..schemas import (
     DependencyGraphEdge,
@@ -481,7 +481,15 @@ async def get_evidence_screenshot(project_name: str, feature_id: int, index: int
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
-    return FileResponse(path)
+    import mimetypes
+
+    from api.safe_project_io import read_project_file
+    try:
+        # resolve_screenshot_path() catches symlinks out of the project, not hard links
+        content = read_project_file(project_dir, path)
+    except OSError:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return Response(content, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream")
 
 
 @router.patch("/{feature_id}", response_model=FeatureResponse)

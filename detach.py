@@ -27,7 +27,7 @@ from api.safe_project_io import (
     append_project_file,
     copy_project_entry,
     make_project_dirs,
-    read_project_file,
+    read_project_text,
     remove_project_tree,
     unlink_project_file,
     write_project_file,
@@ -295,10 +295,10 @@ def get_backup_info(project_dir: Path) -> Manifest | None:
         return None
 
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            data: Manifest = json.load(f)
-            return data
-    except (json.JSONDecodeError, OSError) as e:
+        # Shown in the UI: never read through a link the agent planted
+        data: Manifest = json.loads(read_project_text(project_dir, manifest_path))
+        return data
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         logger.warning("Failed to read manifest: %s", e)
         return None
 
@@ -519,7 +519,7 @@ def restore_backup(project_dir: Path, verify_checksums: bool = False) -> tuple[b
 
     # Read manifest (it decides what is copied into the project: never through a link)
     try:
-        manifest: Manifest = json.loads(read_project_file(project_dir, manifest_path).decode("utf-8"))
+        manifest: Manifest = json.loads(read_project_text(project_dir, manifest_path))
     except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         logger.error("Failed to read manifest: %s", e)
         return False, 0, []

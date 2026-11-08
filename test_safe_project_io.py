@@ -325,6 +325,20 @@ def test_open_project_file_for_write_streams_and_keeps_target_on_error(root, out
     assert list(outside.iterdir()) == []
 
 
+def test_read_project_text_normalizes_newlines_and_refuses_links(root, outside):
+    (root / "a.md").write_bytes(b"one\r\ntwo\rthree\n")
+    (root / "bad.md").write_bytes(b"caf\xe9")
+    (outside / "secret").write_bytes(b"secret")
+    (root / "link.md").symlink_to(outside / "secret")
+
+    assert sio.read_project_text(root, root / "a.md") == "one\ntwo\nthree\n"
+    assert sio.read_project_text(root, root / "bad.md", errors="ignore") == "caf"
+    with pytest.raises(UnicodeDecodeError):
+        sio.read_project_text(root, root / "bad.md")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.read_project_text(root, root / "link.md")
+
+
 def _make_tree(base, outside):
     (base / "sub").mkdir(parents=True)
     (base / "sub" / "a.txt").write_bytes(b"a")

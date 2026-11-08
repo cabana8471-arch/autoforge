@@ -26,7 +26,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from api.safe_project_io import write_project_file
+from api.safe_project_io import read_project_text, write_project_file
 from autoforge_paths import get_security_reports_dir
 
 
@@ -579,7 +579,7 @@ class SecurityScanner:
 
         for file_path in self._iter_files(extensions, skip_dirs):
             try:
-                content = file_path.read_text(errors="ignore")
+                content = read_project_text(self.project_dir, file_path, errors="ignore")
                 lines = content.split("\n")
 
                 for pattern, title, severity, cwe_id in SECRET_PATTERNS:
@@ -632,7 +632,7 @@ class SecurityScanner:
 
         for file_path in self._iter_files(extensions, skip_dirs):
             try:
-                content = file_path.read_text(errors="ignore")
+                content = read_project_text(self.project_dir, file_path, errors="ignore")
                 lines = content.split("\n")
 
                 for pattern, title, vuln_type, severity, cwe_id, recommendation in CODE_PATTERNS:

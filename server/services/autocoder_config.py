@@ -214,8 +214,9 @@ def load_autocoder_config(project_dir: Path) -> AutocoderConfig:
         return copy.deepcopy(DEFAULT_CONFIG)
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            user_config = json.load(f)
+        from api.safe_project_io import read_project_text
+        # Shown in the UI: never read through a link the agent planted
+        user_config = json.loads(read_project_text(project_dir, config_path))
 
         if not isinstance(user_config, dict):
             logger.warning(

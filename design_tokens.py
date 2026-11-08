@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from api.safe_project_io import write_project_file
+from api.safe_project_io import read_project_text, write_project_file
 from autoforge_paths import get_design_tokens_path, get_prompts_dir
 
 logger = logging.getLogger(__name__)
@@ -212,7 +212,7 @@ class DesignTokensManager:
     def _load_from_config(self) -> DesignTokens:
         """Load tokens from JSON config."""
         try:
-            data = json.loads(self.config_path.read_text())
+            data = json.loads(read_project_text(self.project_dir, self.config_path))
             return DesignTokens(
                 colors=data.get("colors", {}),
                 spacing=data.get("spacing", [4, 8, 12, 16, 24, 32, 48, 64, 96]),
@@ -228,7 +228,7 @@ class DesignTokensManager:
     def _parse_from_app_spec(self, app_spec_path: Path) -> Optional[DesignTokens]:
         """Parse design tokens from app_spec.txt."""
         try:
-            content = app_spec_path.read_text()
+            content = read_project_text(self.project_dir, app_spec_path)
 
             # Find design_tokens section
             match = re.search(r"<design_tokens[^>]*>(.*?)</design_tokens>", content, re.DOTALL)

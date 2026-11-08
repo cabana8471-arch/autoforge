@@ -120,7 +120,8 @@ async def get_spec_file_status(project_name: str):
         )
 
     try:
-        data = json.loads(status_file.read_text(encoding="utf-8"))
+        from api.safe_project_io import read_project_text
+        data = json.loads(read_project_text(project_dir, status_file))  # never through a planted link
         return SpecFileStatus(
             exists=True,
             status=data.get("status", "unknown"),

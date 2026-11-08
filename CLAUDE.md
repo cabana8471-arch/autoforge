@@ -140,6 +140,7 @@ python -m pytest test_project_import.py        # Re-register an AutoForge folder
 python -m pytest test_safe_project_io.py       # No-follow project I/O used outside the agent sandbox
 python -m pytest test_project_write_sites.py   # Server/scaffolding/migration writes never follow agent-planted links
 python -m pytest test_project_delete_sites.py  # Deletes never follow a symlinked directory planted in the project
+python -m pytest test_project_read_sites.py    # Files sent to agent prompts or the UI are never read through a link
 python -m pytest test_onboard_project.py       # Onboarding: spec-only write hook, passes=true only in the onboard session
 python -m pytest test_chat_ws_keepalive.py     # Chat WebSockets: long turns survive pings, network drop finishes the turn, closing the chat cancels it
 ```

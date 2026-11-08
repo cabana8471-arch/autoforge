@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from api.safe_project_io import write_project_file
+from api.safe_project_io import read_project_text, write_project_file
 from autoforge_paths import get_prompts_dir
 
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ class DocumentationGenerator:
             return None
 
         try:
-            content = spec_path.read_text()
+            content = read_project_text(self.project_dir, spec_path)
 
             # Extract key elements from XML
             result = {}
@@ -319,7 +319,7 @@ class DocumentationGenerator:
         )
         for route_file in js_ts_routes:
             try:
-                content = route_file.read_text()
+                content = read_project_text(self.project_dir, route_file)
                 # Match router.get/post/put/delete
                 matches = re.findall(
                     r'router\.(get|post|put|delete|patch)\s*\(\s*[\'"]([^\'"]+)[\'"]',
@@ -342,7 +342,7 @@ class DocumentationGenerator:
             if "node_modules" in str(py_file) or "venv" in str(py_file):
                 continue
             try:
-                content = py_file.read_text()
+                content = read_project_text(self.project_dir, py_file)
                 # Match @app.get/post/etc or @router.get/post/etc
                 matches = re.findall(
                     r'@(?:app|router)\.(get|post|put|delete|patch)\s*\(\s*[\'"]([^\'"]+)[\'"]',
@@ -372,7 +372,7 @@ class DocumentationGenerator:
                 if "node_modules" in str(comp_file):
                     continue
                 try:
-                    content = comp_file.read_text()
+                    content = read_project_text(self.project_dir, comp_file)
                     name = comp_file.stem
 
                     # Try to extract description from JSDoc
@@ -422,7 +422,7 @@ class DocumentationGenerator:
             env_path = self.project_dir / env_file
             if env_path.exists():
                 try:
-                    for line in env_path.read_text().split("\n"):
+                    for line in read_project_text(self.project_dir, env_path).split("\n"):
                         line = line.strip()
                         if line and not line.startswith("#") and "=" in line:
                             key, value = line.split("=", 1)
@@ -454,7 +454,7 @@ class DocumentationGenerator:
         package_json = self.project_dir / "package.json"
         if package_json.exists():
             try:
-                data = json.loads(package_json.read_text())
+                data = json.loads(read_project_text(self.project_dir, package_json))
                 scripts = data.get("scripts", {})
             except Exception:
                 pass

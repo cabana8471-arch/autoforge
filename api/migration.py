@@ -13,7 +13,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.database import Feature
-from api.safe_project_io import write_project_file
+from api.safe_project_io import read_project_text, write_project_file
 
 
 def migrate_json_to_sqlite(
@@ -55,8 +55,8 @@ def migrate_json_to_sqlite(
 
     # Load JSON data
     try:
-        with open(json_file, "r", encoding="utf-8") as f:
-            features_data = json.load(f)
+        # The features end up in the agent's tools and the UI: never read through a link
+        features_data = json.loads(read_project_text(project_dir, json_file))
     except json.JSONDecodeError as e:
         print(f"Error parsing feature_list.json: {e}")
         return False

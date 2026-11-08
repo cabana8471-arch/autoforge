@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from api.safe_project_io import read_project_text, unlink_project_file
 from auto_documentation import DocumentationGenerator
 from registry import get_project_path
 
@@ -213,7 +214,7 @@ async def get_doc_content(project_name: str, filename: str):
         raise HTTPException(status_code=400, detail="Only Markdown files are supported")
 
     try:
-        content = file_path.read_text()
+        content = read_project_text(project_dir, file_path)  # never through a planted link
         return {"filename": filename, "content": content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading file: {e}")
@@ -295,7 +296,8 @@ async def delete_doc(project_name: str, filename: str):
         raise HTTPException(status_code=400, detail="Only Markdown files can be deleted")
 
     try:
-        file_path.unlink()
+        # Never through a symlinked directory, never outside the project
+        unlink_project_file(project_dir, file_path)
         return {"deleted": True, "filename": filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting file: {e}")
