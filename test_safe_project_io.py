@@ -451,3 +451,17 @@ def test_path_fallback_refuses_windows_junctions(root, monkeypatch):
     assert sorted(p.name for p in junction.iterdir()) == ["tree", "x.txt"]
     assert not (root / "copy").exists() and not (root / "copy.txt").exists()
     assert sio.is_link_or_junction(junction) and not junction.is_symlink()
+
+
+def test_path_fallback_copy_refuses_a_junction_nested_in_the_tree(root, monkeypatch):
+    """copytree(symlinks=True) treats a nested junction as a directory and copies its outside target."""
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", False)
+    (root / "src" / "junction").mkdir(parents=True)  # a real directory standing in for a junction
+    (root / "src" / "junction" / "id_rsa").write_bytes(b"secret")
+    (root / "src" / "ok.txt").write_bytes(b"ok")
+    _fake_junction(monkeypatch)
+
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.copy_project_entry(root, root / "src", root / "copy")
+    assert not (root / "copy").exists()
+    assert not any(p.name.endswith(".tmp") for p in root.iterdir())

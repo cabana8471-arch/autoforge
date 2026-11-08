@@ -670,3 +670,20 @@ def test_layout_migration_skips_windows_junctions(project: Path, monkeypatch: py
     (project / ".autocoder" / "id_rsa").write_text("secret")  # stands for the junction's outside target
     autoforge_paths.migrate_project_layout(project)
     assert (project / ".autocoder" / "id_rsa").exists() and not (project / ".autoforge" / "id_rsa").exists()
+
+
+def test_layout_migration_does_not_copy_a_junction_nested_in_prompts(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """prompts/ itself is checked; a junction inside it must not copy its outside target either."""
+    monkeypatch.setattr(
+        sio, "_reparse_tag", lambda path: sio._IO_REPARSE_TAG_MOUNT_POINT if Path(path).name == "junction" else 0,
+        raising=False,
+    )
+    (project / "prompts" / "sub" / "junction").mkdir(parents=True)  # nested: sub/ is copied first
+    (project / "prompts" / "sub" / "junction" / "id_rsa").write_text("secret")  # the junction's outside target
+    (project / "prompts" / "app_spec.txt").write_text("spec")
+
+    autoforge_paths.migrate_project_layout(project)
+    assert not (project / ".autoforge" / "prompts").exists()  # nothing half-copied
+    assert (project / "prompts" / "sub" / "junction" / "id_rsa").exists()  # legacy layout left in place

@@ -202,6 +202,18 @@ def is_link_or_junction(path: Path) -> bool:
     return path.is_symlink() or _reparse_tag(path) == _IO_REPARSE_TAG_MOUNT_POINT
 
 
+def refuse_nested_junctions(directory: str, names: list[str]) -> list[str]:
+    """``shutil.copytree`` ``ignore`` callback: refuse a junction at any level of the tree.
+
+    ``copytree(symlinks=True)`` copies symlinks as links but treats a junction as a
+    directory and would copy its target, which may lie outside the project.
+    """
+    for name in names:
+        if _reparse_tag(Path(directory) / name) == _IO_REPARSE_TAG_MOUNT_POINT:
+            raise UnsafeProjectPathError(f"{Path(directory) / name} is a junction")
+    return []
+
+
 def _refuse_symlinks(project_dir: Path, relative: Path) -> Path:
     """Path-based check for platforms without dir_fd: no symlink or junction below the project."""
     current = project_dir
@@ -573,7 +585,7 @@ def copy_project_entry(project_dir: Path, source: Path, target: Path) -> None:
             if src_path.is_symlink():
                 tmp_path.symlink_to(os.readlink(src_path))
             elif src_path.is_dir():
-                shutil.copytree(src_path, tmp_path, symlinks=True)
+                shutil.copytree(src_path, tmp_path, symlinks=True, ignore=refuse_nested_junctions)
             else:
                 shutil.copy2(src_path, tmp_path)
             if dst_path.is_dir() and not dst_path.is_symlink():

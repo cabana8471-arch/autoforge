@@ -365,7 +365,15 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         if old_prompts.is_dir() and not is_link_or_junction(old_prompts) and not new_prompts.exists():
             # symlinks=True copies links as links: a link planted inside prompts/
             # must not copy a file from outside the project into it
-            shutil.copytree(str(old_prompts), str(new_prompts), symlinks=True)
+            # (and refuses a junction anywhere in the tree, which copytree would follow)
+            from api.safe_project_io import refuse_nested_junctions
+
+            try:
+                shutil.copytree(str(old_prompts), str(new_prompts), symlinks=True, ignore=refuse_nested_junctions)
+            except BaseException:
+                # No half-copied prompts/: it would block this migration on the next run
+                shutil.rmtree(str(new_prompts), ignore_errors=True)
+                raise
             shutil.rmtree(str(old_prompts))
             migrated.append("prompts/ -> .autoforge/prompts/")
             logger.info("Migrated prompts/ -> .autoforge/prompts/")
