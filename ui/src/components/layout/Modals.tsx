@@ -35,7 +35,20 @@ export function Modals() {
     specInitializerError, setSpecInitializerError,
     wsState,
     queryClient,
+    features,
   } = useAppContext()
+
+  // selectedFeature is the card clicked; show its latest state (status, evidence)
+  // from the live feature list so the open modal follows the agent's progress
+  const liveSelectedFeature = selectedFeature && features
+    ? [
+        ...features.pending,
+        ...features.in_progress,
+        ...features.done,
+        ...features.needs_human_input,
+        ...(features.needs_manual_testing ?? []),
+      ].find(f => f.id === selectedFeature.id) ?? selectedFeature
+    : selectedFeature
 
   return (
     <>
@@ -48,9 +61,9 @@ export function Modals() {
       )}
 
       {/* Feature Detail Modal */}
-      {selectedFeature && selectedProject && (
+      {liveSelectedFeature && selectedProject && (
         <FeatureModal
-          feature={selectedFeature}
+          feature={liveSelectedFeature}
           projectName={selectedProject}
           onClose={() => setSelectedFeature(null)}
           onOpenBrowsersView={() => {
