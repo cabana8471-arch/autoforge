@@ -55,6 +55,8 @@ class ProjectSummary(BaseModel):
     auto_improve_enabled: bool = False
     auto_improve_interval_minutes: int = 10
     is_detached: bool = False  # True if Autocoder files moved to backup
+    # Why the project's data could not be read (e.g. features.db behind a planted link)
+    error: str | None = None
 
 
 class ProjectDetail(BaseModel):

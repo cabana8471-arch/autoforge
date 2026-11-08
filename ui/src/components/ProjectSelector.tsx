@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, Plus, FolderOpen, Loader2, Trash2, Unlink, Link2 } from 'lucide-react'
+import { ChevronDown, Plus, FolderOpen, Loader2, Trash2, Unlink, Link2, AlertTriangle } from 'lucide-react'
 import type { ProjectSummary } from '../lib/types'
 import { NewProjectModal } from './NewProjectModal'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -154,7 +154,12 @@ export function ProjectSelector({
                     {project.is_detached && (
                       <Badge variant="secondary" className="text-[10px] px-1 py-0 shrink-0">DETACHED</Badge>
                     )}
-                    {!project.is_detached && project.stats.total > 0 && (
+                    {project.error && (
+                      <span title={project.error} className="shrink-0 text-destructive" aria-label="Project data refused">
+                        <AlertTriangle size={14} />
+                      </span>
+                    )}
+                    {!project.is_detached && !project.error && project.stats.total > 0 && (
                       <span className="text-sm font-mono text-muted-foreground ml-auto shrink-0">
                         {project.stats.passing}/{project.stats.total}
                       </span>

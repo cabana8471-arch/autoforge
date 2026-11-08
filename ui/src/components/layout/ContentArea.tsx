@@ -5,7 +5,9 @@
  * Also handles pre-conditions: setup wizard, project selection, and spec creation.
  */
 
+import { AlertTriangle } from 'lucide-react'
 import { useAppContext } from '@/contexts/AppContext'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { SetupWizard } from '../SetupWizard'
 import { ProjectSetupRequired } from '../ProjectSetupRequired'
 import { DashboardView } from '../views/DashboardView'
@@ -47,6 +49,19 @@ export function ContentArea() {
           <h2 className="font-display text-2xl font-bold mb-2">Welcome to AutoForge</h2>
           <p className="text-muted-foreground">Select a project from the sidebar to get started.</p>
         </div>
+      </div>
+    )
+  }
+
+  // Step 3a: The project's data was refused (e.g. features.db behind a planted link)
+  if (selectedProjectData?.error) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6">
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle>AutoForge refused to open this project's data</AlertTitle>
+          <AlertDescription>{selectedProjectData.error}</AlertDescription>
+        </Alert>
       </div>
     )
   }

@@ -100,7 +100,16 @@ def test_project_list_survives_one_refused_database(project: Path, outside: Path
     response = client.get("/api/projects")
 
     assert response.status_code == 200
-    assert response.json()[0]["stats"]["total"] == 0
+    summary = response.json()[0]
+    assert summary["stats"]["total"] == 0
+    # The reason reaches the UI instead of a silent 0/0
+    assert "Refusing to open the project database" in summary["error"]
+
+
+def test_project_list_has_no_error_for_a_healthy_project(project: Path, monkeypatch) -> None:
+    client = _client(monkeypatch, project)
+
+    assert client.get("/api/projects").json()[0]["error"] is None
 
 
 def test_count_passing_tests_raises_instead_of_zeros(project: Path, outside: Path) -> None:

@@ -19,6 +19,8 @@ export interface ProjectSummary {
   auto_improve_enabled: boolean
   auto_improve_interval_minutes: number
   is_detached: boolean
+  // Why the project's data could not be read (e.g. features.db behind a planted link)
+  error?: string | null
 }
 
 export interface ProjectDetail extends ProjectSummary {

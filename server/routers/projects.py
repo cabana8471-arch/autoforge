@@ -180,13 +180,15 @@ async def list_projects():
             continue
 
         has_spec = _check_spec_exists(project_dir)
+        error = None
         try:
             stats = get_project_stats(project_dir)
         except UnsafeProjectPathError as e:
             # One project with a refused database must not break the whole list;
-            # its own endpoints answer 409 with the reason
+            # the reason is shown in the UI and its own endpoints answer 409
             logger.warning("No stats for project %s: %s", name, e)
             stats = ProjectStats(passing=0, in_progress=0, total=0, percentage=0.0)
+            error = str(e)
 
         result.append(ProjectSummary(
             name=name,
@@ -199,6 +201,7 @@ async def list_projects():
                 info.get("auto_improve_interval_minutes", 10) or 10
             ),
             is_detached=_detach_module.is_project_detached(project_dir),
+            error=error,
         ))
 
     return result
