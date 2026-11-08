@@ -1,7 +1,8 @@
-import { CheckCircle2, Circle, ClipboardCheck, Loader2, MessageCircle, Monitor, UserCircle } from 'lucide-react'
+import { Archive, CheckCircle2, Circle, CircleCheckBig, ClipboardCheck, Loader2, MessageCircle, Monitor, UserCircle } from 'lucide-react'
 import type { Feature, ActiveAgent } from '../lib/types'
 import { DependencyBadge } from './DependencyBadge'
 import { AgentAvatar } from './AgentAvatar'
+import { MaturityBadge } from './MaturityBadge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
@@ -47,17 +48,19 @@ export function FeatureCard({ feature, onClick, isInProgress, allFeatures = [], 
         ${feature.passes ? 'border-primary/50' : ''}
         ${feature.needs_human_input ? 'border-amber-500/50' : ''}
         ${feature.needs_manual_testing ? 'border-violet-500/50' : ''}
-        ${isBlocked && !feature.passes && !feature.needs_human_input && !feature.needs_manual_testing ? 'border-destructive/50 opacity-80' : ''}
+        ${isBlocked && !feature.passes && !feature.needs_human_input && !feature.needs_manual_testing && !feature.backlog ? 'border-destructive/50 opacity-80' : ''}
+        ${feature.backlog ? 'border-dashed' : ''}
         ${hasActiveAgent ? 'ring-2 ring-primary ring-offset-2' : ''}
       `}
     >
       <CardContent className="p-4 space-y-3">
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge className={`${categoryColor} text-white`}>
               {feature.category}
             </Badge>
+            <MaturityBadge maturity={feature.maturity} />
             <DependencyBadge feature={feature} allFeatures={allFeatures} compact />
           </div>
           <span className="font-mono text-sm text-muted-foreground">
@@ -123,6 +126,23 @@ export function FeatureCard({ feature, onClick, isInProgress, allFeatures = [], 
                 </span>
               )}
             </>
+          ) : feature.backlog ? (
+            feature.ready ? (
+              <>
+                <CircleCheckBig size={16} className="text-primary" />
+                <span className="text-primary">Ready to promote</span>
+              </>
+            ) : (
+              <>
+                <Archive size={16} className="text-muted-foreground" />
+                <span className="text-muted-foreground">
+                  Backlog
+                  {feature.readiness && feature.readiness.length > 0 && (
+                    <> · {feature.readiness.filter(c => c.passed).length}/{feature.readiness.length} ready checks</>
+                  )}
+                </span>
+              </>
+            )
           ) : feature.needs_human_input ? (
             <>
               <UserCircle size={16} className="text-amber-500" />

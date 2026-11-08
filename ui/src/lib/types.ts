@@ -136,10 +136,25 @@ export interface Feature {
   needs_manual_testing?: boolean     // Code complete, waiting for a human to test it
   manual_testing_notes?: string | null
   test_evidence?: TestEvidence | null
+  backlog?: boolean                 // Not committed / not ready - excluded from agent queue
+  maturity?: Maturity | null        // Spec review maturity tag
+  spec_notes?: string | null        // Rollout constraints, risks, must-not-break areas
+  readiness?: ReadinessCheck[]      // Computed by API: Backlog -> Pending ready checks
+  ready?: boolean                   // Computed by API: all ready checks pass
+}
+
+// Spec roadmapping maturity tags
+export type Maturity = 'alpha' | 'limited_beta' | 'beta'
+
+export interface ReadinessCheck {
+  id: string
+  label: string
+  passed: boolean
+  detail?: string | null
 }
 
 // Status type for graph nodes
-export type FeatureStatus = 'pending' | 'in_progress' | 'done' | 'blocked' | 'needs_human_input' | 'needs_manual_testing'
+export type FeatureStatus = 'pending' | 'in_progress' | 'done' | 'blocked' | 'needs_human_input' | 'needs_manual_testing' | 'backlog'
 
 // Graph visualization types
 export interface GraphNode {
@@ -149,6 +164,7 @@ export interface GraphNode {
   status: FeatureStatus
   priority: number
   dependencies: number[]
+  maturity?: Maturity | null
 }
 
 export interface GraphEdge {
@@ -167,6 +183,7 @@ export interface FeatureListResponse {
   done: Feature[]
   needs_human_input: Feature[]
   needs_manual_testing?: Feature[]
+  backlog?: Feature[]
 }
 
 export interface FeatureCreate {
@@ -176,6 +193,9 @@ export interface FeatureCreate {
   steps: string[]
   priority?: number
   dependencies?: number[]
+  backlog?: boolean
+  maturity?: Maturity | null
+  spec_notes?: string | null
 }
 
 export interface FeatureUpdate {
@@ -186,6 +206,8 @@ export interface FeatureUpdate {
   priority?: number
   dependencies?: number[]
   reopen?: boolean  // Move a completed feature back to pending
+  maturity?: Maturity | null
+  spec_notes?: string | null
 }
 
 // Agent types
@@ -738,6 +760,7 @@ export interface Settings {
   api_has_auth_token: boolean
   api_model: string | null
   max_cost_usd: number  // Per-project spending limit in USD (0 = unlimited)
+  maturity_order?: Maturity[]  // Scheduling order, first = highest
 }
 
 export interface SettingsUpdate {
@@ -753,6 +776,7 @@ export interface SettingsUpdate {
   api_auth_token?: string
   api_model?: string
   max_cost_usd?: number
+  maturity_order?: Maturity[]
 }
 
 // Token/cost usage tracking

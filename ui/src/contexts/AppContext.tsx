@@ -22,6 +22,7 @@ import { useFeatureSound } from '../hooks/useFeatureSound'
 import { useCelebration } from '../hooks/useCelebration'
 import { useTheme, type ThemeId, type ThemeOption } from '../hooks/useTheme'
 import { getDependencyGraph } from '../lib/api'
+import { allFeaturesOf } from '../lib/maturity'
 import type {
   Feature,
   FeatureListResponse,
@@ -253,6 +254,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // Backlog features are not committed work: they stay out of the progress total
     const total =
       (features?.pending.length ?? 0) +
       (features?.in_progress.length ?? 0) +
@@ -275,14 +277,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // ---- Graph node click handler ----
   const handleGraphNodeClick = useCallback((nodeId: number) => {
-    const allFeatures = [
-      ...(features?.pending ?? []),
-      ...(features?.in_progress ?? []),
-      ...(features?.done ?? []),
-      ...(features?.needs_human_input ?? []),
-      ...(features?.needs_manual_testing ?? []),
-    ]
-    const feature = allFeatures.find(f => f.id === nodeId)
+    const feature = allFeaturesOf(features).find(f => f.id === nodeId)
     if (feature) setSelectedFeature(feature)
   }, [features])
 
@@ -375,12 +370,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         (e.key === 'e' || e.key === 'E') &&
         selectedProject &&
         hasSpec &&
-        features &&
-        (features.pending.length +
-          features.in_progress.length +
-          features.done.length +
-          (features.needs_human_input?.length || 0) +
-          (features.needs_manual_testing?.length || 0)) > 0
+        allFeaturesOf(features).length > 0
       ) {
         e.preventDefault()
         setShowExpandProject(true)

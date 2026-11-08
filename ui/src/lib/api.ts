@@ -12,6 +12,7 @@ import type {
   Feature,
   FeatureCreate,
   FeatureUpdate,
+  Maturity,
   FeatureBulkCreate,
   FeatureBulkCreateResponse,
   GitHubImportResponse,
@@ -63,7 +64,9 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }))
-    throw new Error(error.detail || `HTTP ${response.status}`)
+    // detail is usually a string, but some endpoints return {message, ...}
+    const detail = typeof error.detail === 'string' ? error.detail : error.detail?.message
+    throw new Error(detail || `HTTP ${response.status}`)
   }
 
   // Handle 204 No Content responses
@@ -257,6 +260,30 @@ export async function updateFeature(
   return fetchJSON(`/projects/${encodeURIComponent(projectName)}/features/${featureId}`, {
     method: 'PATCH',
     body: JSON.stringify(update),
+  })
+}
+
+export async function reviewFeatureSpec(
+  projectName: string,
+  featureId: number,
+  review: { maturity: Maturity; notes?: string | null }
+): Promise<Feature> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/features/${featureId}/spec-review`, {
+    method: 'POST',
+    body: JSON.stringify(review),
+  })
+}
+
+export async function moveFeatureToBacklog(projectName: string, featureId: number): Promise<Feature> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/features/${featureId}/backlog`, {
+    method: 'POST',
+  })
+}
+
+export async function promoteFeature(projectName: string, featureId: number, force = false): Promise<Feature> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/features/${featureId}/promote`, {
+    method: 'POST',
+    body: JSON.stringify({ force }),
   })
 }
 

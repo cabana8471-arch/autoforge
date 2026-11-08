@@ -18,7 +18,18 @@ _root = Path(__file__).parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
+from api.roadmap import DEFAULT_MATURITY_ORDER, MATURITY_LEVELS, normalize_maturity
 from registry import DEFAULT_MODEL, LEGACY_MODEL_MAP, VALID_MODELS
+
+# Maturity tag assigned during spec review (see api/roadmap.py)
+Maturity = Literal["alpha", "limited_beta", "beta"]
+
+
+def _normalize_maturity_value(v):
+    """Accept "Limited Beta" / "limited-beta" style input for maturity tags."""
+    if isinstance(v, str):
+        return normalize_maturity(v)
+    return v
 
 # ============================================================================
 # Project Schemas
@@ -188,15 +199,28 @@ class FeatureBase(BaseModel):
     description: str
     steps: list[str]
     dependencies: list[int] = Field(default_factory=list)  # Optional dependencies
+    maturity: Maturity | None = None  # Spec review maturity tag
+    spec_notes: str | None = Field(None, max_length=5000)  # Rollout constraints, risks, etc.
+
+    @field_validator('maturity', mode='before')
+    @classmethod
+    def normalize_maturity_tag(cls, v):
+        return _normalize_maturity_value(v)
 
 
 class FeatureCreate(FeatureBase):
     """Request schema for creating a new feature."""
     priority: int | None = None
+    backlog: bool = False  # True = park in Backlog (not ready, excluded from agent queue)
 
 
 class FeatureUpdate(BaseModel):
-    """Request schema for updating a feature (partial updates allowed)."""
+    """Request schema for updating a feature (partial updates allowed).
+
+    maturity / spec_notes may be explicitly set to null to clear them.
+    Backlog state changes go through the /backlog and /promote endpoints so
+    ready checks are always enforced.
+    """
     category: str | None = None
     name: str | None = None
     description: str | None = None
@@ -204,6 +228,21 @@ class FeatureUpdate(BaseModel):
     priority: int | None = None
     dependencies: list[int] | None = None  # Optional - can update dependencies
     reopen: bool = False  # Reset a completed feature to pending so the agent re-implements it
+    maturity: Maturity | None = None
+    spec_notes: str | None = Field(None, max_length=5000)
+
+    @field_validator('maturity', mode='before')
+    @classmethod
+    def normalize_maturity_tag(cls, v):
+        return _normalize_maturity_value(v)
+
+
+class ReadinessCheck(BaseModel):
+    """A single "ready" check gating promotion from Backlog to Pending."""
+    id: str
+    label: str
+    passed: bool
+    detail: str | None = None
 
 
 class FeatureResponse(FeatureBase):
@@ -220,6 +259,9 @@ class FeatureResponse(FeatureBase):
     needs_manual_testing: bool = False
     manual_testing_notes: str | None = None
     test_evidence: dict | None = None  # {result, summary, test_log, screenshots, recorded_at}
+    backlog: bool = False  # Not committed / not ready - excluded from the agent queue
+    readiness: list[ReadinessCheck] = Field(default_factory=list)  # Computed ready checks
+    ready: bool = False  # Computed: all ready checks pass
 
     class Config:
         from_attributes = True
@@ -259,6 +301,23 @@ class FeatureListResponse(BaseModel):
     done: list[FeatureResponse]
     needs_human_input: list[FeatureResponse] = Field(default_factory=list)
     needs_manual_testing: list[FeatureResponse] = Field(default_factory=list)
+    backlog: list[FeatureResponse] = Field(default_factory=list)
+
+
+class SpecReviewRequest(BaseModel):
+    """Request schema for the Spec Review step (assigns a maturity tag)."""
+    maturity: Maturity
+    notes: str | None = Field(None, max_length=5000)
+
+    @field_validator('maturity', mode='before')
+    @classmethod
+    def normalize_maturity_tag(cls, v):
+        return _normalize_maturity_value(v)
+
+
+class PromoteRequest(BaseModel):
+    """Request schema for promoting a feature from Backlog to Pending."""
+    force: bool = False  # Human override: promote even if ready checks fail
 
 
 class FeatureBulkCreate(BaseModel):
@@ -282,9 +341,10 @@ class DependencyGraphNode(BaseModel):
     id: int
     name: str
     category: str
-    status: Literal["pending", "in_progress", "done", "blocked", "needs_human_input", "needs_manual_testing"]
+    status: Literal["pending", "in_progress", "done", "blocked", "needs_human_input", "needs_manual_testing", "backlog"]
     priority: int
     dependencies: list[int]
+    maturity: Maturity | None = None
 
 
 class DependencyGraphEdge(BaseModel):
@@ -594,6 +654,7 @@ class SettingsResponse(BaseModel):
     api_has_auth_token: bool = False  # Never expose actual token
     api_model: str | None = None
     max_cost_usd: float = 0.0  # Per-project spending limit in USD (0 = unlimited)
+    maturity_order: list[str] = Field(default_factory=lambda: list(DEFAULT_MATURITY_ORDER))  # First = highest
 
 
 class ModelsResponse(BaseModel):
@@ -617,6 +678,21 @@ class SettingsUpdate(BaseModel):
     api_auth_token: str | None = Field(None, max_length=500)  # Write-only, never returned
     api_model: str | None = Field(None, max_length=200)
     max_cost_usd: float | None = Field(None, ge=0, le=1_000_000)  # 0 = unlimited
+    maturity_order: list[Maturity] | None = None  # Scheduling order, first = highest
+
+    @field_validator('maturity_order', mode='before')
+    @classmethod
+    def normalize_maturity_order(cls, v):
+        if isinstance(v, list):
+            return [_normalize_maturity_value(item) for item in v]
+        return v
+
+    @field_validator('maturity_order')
+    @classmethod
+    def validate_maturity_order(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None and sorted(v) != sorted(MATURITY_LEVELS):
+            raise ValueError(f"maturity_order must list each of {list(MATURITY_LEVELS)} exactly once")
+        return v
 
     @field_validator('api_base_url')
     @classmethod

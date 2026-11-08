@@ -105,16 +105,20 @@ def count_passing_tests(project_dir: Path) -> tuple[int, int, int, int]:
     try:
         with closing(_get_connection(project_dir, db_file)) as conn:
             cursor = conn.cursor()
+            # Backlog features (#326) are not committed work: they stay out of the counts,
+            # so progress and "all features complete" are about the work agents can do
+            columns = {row[1] for row in cursor.execute("PRAGMA table_info(features)")}
+            where = "WHERE COALESCE(backlog, 0) = 0" if "backlog" in columns else ""
             # Single aggregate query instead of separate COUNT queries
             # Handle case where columns don't exist yet (legacy DBs)
             try:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT
                         COUNT(*) as total,
                         SUM(CASE WHEN passes = 1 THEN 1 ELSE 0 END) as passing,
                         SUM(CASE WHEN in_progress = 1 THEN 1 ELSE 0 END) as in_progress,
                         SUM(CASE WHEN needs_human_input = 1 THEN 1 ELSE 0 END) as needs_human_input
-                    FROM features
+                    FROM features {where}
                 """)
                 row = cursor.fetchone()
                 total = row[0] or 0

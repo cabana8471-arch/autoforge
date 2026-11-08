@@ -11,7 +11,8 @@ interface KanbanColumnProps {
   features: Feature[]
   allFeatures?: Feature[]
   activeAgents?: ActiveAgent[]
-  color: 'pending' | 'progress' | 'done' | 'human_input' | 'manual_testing'
+  color: 'backlog' | 'pending' | 'progress' | 'done' | 'human_input' | 'manual_testing'
+  emptyMessage?: string
   onFeatureClick: (feature: Feature) => void
   onAddFeature?: () => void
   onExpandProject?: () => void
@@ -24,6 +25,7 @@ interface KanbanColumnProps {
 }
 
 const colorMap = {
+  backlog: 'border-t-4 border-t-muted border-dashed',
   pending: 'border-t-4 border-t-muted',
   progress: 'border-t-4 border-t-primary',
   done: 'border-t-4 border-t-primary',
@@ -47,6 +49,7 @@ export function KanbanColumn({
   showCreateSpec,
   onImportExisting,
   showImportExisting,
+  emptyMessage = 'No features',
 }: KanbanColumnProps) {
   // Create a map of feature ID to active agent for quick lookup
   // Maps ALL batch feature IDs to the same agent
@@ -127,7 +130,7 @@ export function KanbanColumn({
                     </p>
                   </div>
                 ) : (
-                  'No features'
+                  emptyMessage
                 )}
               </div>
             ) : (

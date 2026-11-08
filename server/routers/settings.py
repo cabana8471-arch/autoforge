@@ -17,6 +17,7 @@ from ..services.chat_constants import ROOT_DIR
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from api.roadmap import MATURITY_ORDER_SETTING, parse_maturity_order
 from registry import (
     API_PROVIDERS,
     AVAILABLE_MODELS,
@@ -131,6 +132,7 @@ async def get_settings():
         api_has_auth_token=bool(all_settings.get("api_auth_token")),
         api_model=all_settings.get("api_model"),
         max_cost_usd=_parse_float(all_settings.get("max_cost_usd"), 0.0),
+        maturity_order=parse_maturity_order(all_settings.get(MATURITY_ORDER_SETTING)),
     )
 
 
@@ -192,6 +194,8 @@ async def update_settings(update: SettingsUpdate):
 
     if update.max_cost_usd is not None:
         set_setting("max_cost_usd", str(update.max_cost_usd))
+    if update.maturity_order is not None:
+        set_setting(MATURITY_ORDER_SETTING, ",".join(update.maturity_order))
 
     # Return updated settings
     all_settings = get_all_settings()
@@ -215,4 +219,5 @@ async def update_settings(update: SettingsUpdate):
         api_has_auth_token=bool(all_settings.get("api_auth_token")),
         api_model=all_settings.get("api_model"),
         max_cost_usd=_parse_float(all_settings.get("max_cost_usd"), 0.0),
+        maturity_order=parse_maturity_order(all_settings.get(MATURITY_ORDER_SETTING)),
     )

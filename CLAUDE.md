@@ -154,6 +154,8 @@ python -m pytest test_billing_utils.py        # Spend safeguards: billing stop, 
 python -m pytest test_spend_stop_status.py    # Exit codes 3/4 are "stopped" with a reason, never "crashed" (no scheduler restart)
 python -m pytest test_project_skills.py       # Project skills: library (no ~/.claude/skills), install/remove, planted links, Skill tool
 python -m pytest test_github_issues.py        # GitHub issue import: parsing, endpoints, comments excluded by default
+python -m pytest test_roadmap.py              # Backlog + maturity tags: ready checks, promote/backlog endpoints, scheduling order
+python -m pytest test_backlog_scheduling.py   # Backlog stays out of progress totals, stall reasons and completion message
 ```
 
 ### React UI
@@ -294,6 +296,10 @@ MCP tools available to the agent:
 - `feature_verify_quality` - Run lint/type-check quality gates and store the result on the feature
 - `feature_report_failure` - Record why a feature attempt failed (increments `failure_count`)
 - `feature_mark_needs_manual_testing` - Hand a code-complete feature the agent cannot verify (e.g. native mobile app) to the Manual Testing lane; its dependents stay blocked until a human marks it passed
+
+#### Backlog and Maturity Tags
+
+Features can be parked in a **Backlog** lane (`backlog=True`): agents never claim, resume or batch them, and they stay out of progress totals (`progress.count_passing_tests`, `feature_get_stats`). A human promotes a feature to Pending (`POST /api/projects/{name}/features/{id}/promote`) once its ready checks pass (description, test steps, maturity tag, no dependency in the Backlog), or forces it. A pending feature that depends on a Backlog feature makes the orchestrator stop with that reason. Spec review assigns a maturity tag (`alpha`/`limited_beta`/`beta`, `api/roadmap.py`); ready features are scheduled by tag in the order set in Settings, then by dependency score.
 
 #### Quality Gates
 

@@ -10,6 +10,8 @@ import heapq
 from collections import deque
 from typing import TypedDict
 
+from api.roadmap import DEFAULT_MATURITY_ORDER, ready_sort_key
+
 # Security: Prevent DoS via excessive dependencies
 MAX_DEPENDENCIES_PER_FEATURE = 20
 MAX_DEPENDENCY_DEPTH = 50  # Prevent stack overflow in cycle detection
@@ -356,34 +358,40 @@ def compute_scheduling_scores(features: list[dict]) -> dict[int, float]:
     return scores
 
 
-def get_ready_features(features: list[dict], limit: int = 10) -> list[dict]:
+def get_ready_features(
+    features: list[dict],
+    limit: int = 10,
+    maturity_order: list[str] | tuple[str, ...] = DEFAULT_MATURITY_ORDER,
+) -> list[dict]:
     """Get features that are ready to be worked on.
 
     A feature is ready if:
     - It is not passing
     - It is not in progress
+    - It is not in the Backlog
     - All its dependencies are satisfied
 
     Args:
         features: List of all feature dicts
         limit: Maximum number of features to return
+        maturity_order: Maturity tags in scheduling order (first = highest)
 
     Returns:
-        List of ready features, sorted by priority
+        List of ready features, sorted by maturity tag then scheduling score
     """
     passing_ids = {f["id"] for f in features if f.get("passes")}
 
     ready = []
     for f in features:
-        if f.get("passes") or f.get("in_progress") or f.get("needs_manual_testing"):
+        if f.get("passes") or f.get("in_progress") or f.get("needs_manual_testing") or f.get("backlog"):
             continue
         deps = f.get("dependencies") or []
         if all(dep_id in passing_ids for dep_id in deps):
             ready.append(f)
 
-    # Sort by scheduling score (higher = first), then priority, then id
+    # Sort by maturity tag, then scheduling score (higher = first), then priority, then id
     scores = compute_scheduling_scores(features)
-    ready.sort(key=lambda f: (-scores.get(f["id"], 0), f.get("priority", 999), f["id"]))
+    ready.sort(key=ready_sort_key(scores, maturity_order))
 
     return ready[:limit]
 
@@ -401,7 +409,8 @@ def get_blocked_features(features: list[dict]) -> list[dict]:
 
     blocked = []
     for f in features:
-        if f.get("passes") or f.get("needs_manual_testing"):
+        # Backlog features are parked, not blocked (agents never pick them up)
+        if f.get("passes") or f.get("needs_manual_testing") or f.get("backlog"):
             continue
         deps = f.get("dependencies") or []
         blocking = [d for d in deps if d not in passing_ids]
@@ -516,11 +525,15 @@ def explain_stalled_features(
 
     Returns:
         Map of feature_id -> human-readable reason, for every feature that is
-        neither passing nor permanently failed.
+        neither passing, permanently failed nor parked in the Backlog.
     """
     failed_ids = failed_ids or set()
     feature_map = {f["id"]: f for f in features}
-    pending = [f for f in features if not f.get("passes") and f["id"] not in failed_ids]
+    # Backlog features are not committed work: never "stalled" themselves
+    backlog_ids = {f["id"] for f in features if f.get("backlog") and not f.get("passes")}
+    pending = [
+        f for f in features if not f.get("passes") and f["id"] not in failed_ids and f["id"] not in backlog_ids
+    ]
     pending_map = {f["id"]: f for f in pending}
     human_ids = {f["id"] for f in pending if f.get("needs_human_input")}
     manual_ids = {f["id"] for f in pending if f.get("needs_manual_testing")} - human_ids
@@ -536,6 +549,7 @@ def explain_stalled_features(
         deps = f.get("dependencies") or []
         missing = [d for d in deps if d not in feature_map]
         failed = [d for d in deps if d in failed_ids]
+        parked = [d for d in deps if d in backlog_ids]
         human = [d for d in deps if d in human_ids]
         manual = [d for d in deps if d in manual_ids]
         waiting = [d for d in deps if d in pending_map and d not in human_ids and d not in manual_ids]
@@ -551,6 +565,11 @@ def explain_stalled_features(
             reasons[fid] = f"circular dependency {' -> '.join(f'#{i}' for i in cycle + cycle[:1])}"
         elif failed:
             reasons[fid] = f"depends on feature(s) that failed too many times {_format_ids(failed)}"
+        elif parked:
+            reasons[fid] = (
+                f"depends on Backlog feature(s) {_format_ids(parked)}; promote them to Pending "
+                "or remove the dependency"
+            )
         elif human:
             reasons[fid] = f"depends on feature(s) waiting for human input {_format_ids(human)}"
         elif manual:
@@ -585,6 +604,8 @@ def build_graph_data(features: list[dict]) -> dict:
 
         if f.get("passes"):
             status = "done"
+        elif f.get("backlog"):
+            status = "backlog"
         elif f.get("needs_manual_testing"):
             status = "needs_manual_testing"
         elif blocking:

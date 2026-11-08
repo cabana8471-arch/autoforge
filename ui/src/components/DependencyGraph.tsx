@@ -15,7 +15,7 @@ import {
   Handle,
 } from '@xyflow/react'
 import dagre from 'dagre'
-import { CheckCircle2, Circle, Loader2, AlertTriangle, RefreshCw, UserCircle, ClipboardCheck } from 'lucide-react'
+import { CheckCircle2, Circle, Loader2, AlertTriangle, RefreshCw, UserCircle, ClipboardCheck, Archive } from 'lucide-react'
 import type { DependencyGraph as DependencyGraphData, GraphNode, ActiveAgent, AgentMascot, AgentState } from '../lib/types'
 import { AgentAvatar } from './AgentAvatar'
 import { Button } from '@/components/ui/button'
@@ -100,6 +100,7 @@ function FeatureNode({ data }: { data: GraphNode & { onClick?: () => void; agent
     blocked: 'bg-red-50 border-red-300 dark:bg-red-900/20 dark:border-red-700',
     needs_human_input: 'bg-amber-100 border-amber-300 dark:bg-amber-900/30 dark:border-amber-700',
     needs_manual_testing: 'bg-violet-100 border-violet-300 dark:bg-violet-900/30 dark:border-violet-700',
+    backlog: 'bg-slate-100 border-slate-300 border-dashed dark:bg-slate-800/40 dark:border-slate-600',
   }
 
   const textColors: Record<string, string> = {
@@ -109,6 +110,7 @@ function FeatureNode({ data }: { data: GraphNode & { onClick?: () => void; agent
     blocked: 'text-red-900 dark:text-red-100',
     needs_human_input: 'text-amber-900 dark:text-amber-100',
     needs_manual_testing: 'text-violet-900 dark:text-violet-100',
+    backlog: 'text-slate-700 dark:text-slate-200',
   }
 
   const StatusIcon = () => {
@@ -123,6 +125,8 @@ function FeatureNode({ data }: { data: GraphNode & { onClick?: () => void; agent
         return <UserCircle size={16} className={textColors[data.status]} />
       case 'needs_manual_testing':
         return <ClipboardCheck size={16} className={textColors[data.status]} />
+      case 'backlog':
+        return <Archive size={16} className={textColors[data.status]} />
       default:
         return <Circle size={16} className={textColors[data.status]} />
     }
@@ -335,6 +339,8 @@ function DependencyGraphInner({ graphData, onNodeClick, activeAgents = [] }: Dep
         return '#f59e0b' // amber-500
       case 'needs_manual_testing':
         return '#8b5cf6' // violet-500
+      case 'backlog':
+        return '#94a3b8' // slate-400
       default:
         return '#eab308' // yellow-500
     }
@@ -393,6 +399,10 @@ function DependencyGraphInner({ graphData, onNodeClick, activeAgents = [] }: Dep
             <div className="flex items-center gap-2 text-xs">
               <div className="w-3 h-3 rounded bg-red-100 border border-red-400" />
               <span>Blocked</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <div className="w-3 h-3 rounded bg-slate-200 border border-dashed border-slate-400" />
+              <span>Backlog</span>
             </div>
           </div>
         </CardContent>
