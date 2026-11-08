@@ -248,3 +248,54 @@ def test_ui_start_refused_once_the_project_limit_is_reached(tmp_path, monkeypatc
     assert not ok
     assert "Cost limit reached: $2.50 spent of $2.00" in message
     popen.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# The cap check fails closed: an unreadable spend or limit never means "go on"
+# ---------------------------------------------------------------------------
+
+
+def test_cap_check_fails_closed_when_spend_cannot_be_read(project_dir, cost_limit, monkeypatch):
+    import sqlalchemy.exc
+
+    cost_limit("1")
+    usage_tracker.record_usage(project_dir, {"cost_usd": 0.5})
+
+    def locked(*_a, **_k):
+        raise sqlalchemy.exc.OperationalError("select", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(usage_tracker, "create_database", locked)
+    assert usage_tracker.get_usage_totals(project_dir)["cost_usd"] == 0.0  # display path: zeros + warning
+    with pytest.raises(usage_tracker.CostCheckError, match="database is locked"):
+        usage_tracker.check_cost_limit(project_dir)
+
+
+def test_cap_check_fails_closed_when_the_limit_cannot_be_read(project_dir, monkeypatch):
+    def broken(*_a, **_k):
+        raise RuntimeError("registry unreadable")
+
+    monkeypatch.setattr(registry, "get_setting", broken)
+    with pytest.raises(usage_tracker.CostCheckError, match="registry unreadable"):
+        usage_tracker.check_cost_limit(project_dir)
+
+
+def test_ui_start_refused_when_the_cap_cannot_be_checked(tmp_path, monkeypatch):
+    import asyncio
+    from unittest.mock import patch
+
+    from server.services import process_manager
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    project = tmp_path / "project"
+    (project / ".autoforge").mkdir(parents=True)
+
+    def broken(_project_dir):
+        raise usage_tracker.CostCheckError("database is locked")
+
+    monkeypatch.setattr(process_manager, "check_cost_limit", broken)
+    manager = process_manager.AgentProcessManager("demo", project, Path(process_manager.__file__).parents[2])
+    with patch.object(process_manager.subprocess, "Popen") as popen:
+        ok, message = asyncio.run(manager.start())
+    assert not ok
+    assert "Could not check the cost limit" in message
+    popen.assert_not_called()

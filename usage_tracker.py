@@ -100,19 +100,33 @@ def record_usage(
         logger.warning("Failed to record usage for %s: %s", project_dir, e)
 
 
-def get_cost_limit() -> float | None:
-    """Return the configured per-project cost limit in USD, or None if unlimited."""
+class CostCheckError(Exception):
+    """The cost limit or the project's spend could not be read; callers must not spend."""
+
+
+def get_cost_limit(strict: bool = False) -> float | None:
+    """Return the configured per-project cost limit in USD, or None if unlimited.
+
+    With ``strict`` a registry read error raises CostCheckError instead of
+    reading as "unlimited" (the enforcement path fails closed).
+    """
     try:
         from registry import get_setting
         raw = get_setting(COST_LIMIT_SETTING)
-    except Exception:
+    except Exception as e:
+        if strict:
+            raise CostCheckError(f"Could not read the cost limit setting: {e}") from e
         return None
     limit = _to_float(raw)
     return limit if limit > 0 else None
 
 
-def get_usage_totals(project_dir: Path) -> dict[str, Any]:
-    """Return cumulative usage for a project (all zeros if nothing recorded)."""
+def get_usage_totals(project_dir: Path, strict: bool = False) -> dict[str, Any]:
+    """Return cumulative usage for a project (all zeros if nothing recorded).
+
+    A read error returns zeros with a warning (display path), or raises
+    CostCheckError with ``strict`` (enforcement path: never a silent $0).
+    """
     totals: dict[str, Any] = {
         "sessions": 0,
         "input_tokens": 0,
@@ -140,6 +154,8 @@ def get_usage_totals(project_dir: Path) -> dict[str, Any]:
     except UnsafeProjectPathError:
         raise  # a planted link is a refusal, never a silent $0 spend (shown as 409)
     except Exception as e:
+        if strict:
+            raise CostCheckError(f"Could not read the project's spend: {e}") from e
         logger.warning("Failed to read usage for %s: %s", project_dir, e)
         return totals
     totals.update(
@@ -196,11 +212,15 @@ def check_cost_limit(project_dir: Path) -> tuple[bool, float, float | None]:
 
     Returns:
         (limit_reached, total_cost_usd, limit_usd_or_None)
+
+    Raises:
+        CostCheckError: the limit or the spend could not be read (fail closed)
+        UnsafeProjectPathError: features.db is refused (planted link)
     """
-    limit = get_cost_limit()
+    limit = get_cost_limit(strict=True)
     if limit is None:
         return False, 0.0, None
-    total = get_usage_totals(project_dir)["cost_usd"]
+    total = get_usage_totals(project_dir, strict=True)["cost_usd"]
     return total >= limit, total, limit
 
 
