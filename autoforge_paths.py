@@ -367,11 +367,11 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
             # must not copy a file from outside the project into it
             # (and refuses a junction anywhere in the tree, which copytree would follow)
             # (a hard-linked prompt is refused too: the copy would launder its content)
-            from api.safe_project_io import copy2_refusing_hard_links, refuse_nested_junctions
+            from api.safe_project_io import copy2_refusing_hard_links, refuse_links_in_tree
 
             try:
                 shutil.copytree(
-                    str(old_prompts), str(new_prompts), symlinks=True, ignore=refuse_nested_junctions,
+                    str(old_prompts), str(new_prompts), symlinks=True, ignore=refuse_links_in_tree,
                     copy_function=copy2_refusing_hard_links,
                 )
             except BaseException:

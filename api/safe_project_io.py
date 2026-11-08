@@ -205,16 +205,37 @@ def is_link_or_junction(path: Path) -> bool:
     return path.is_symlink() or _reparse_tag(path) == _IO_REPARSE_TAG_MOUNT_POINT
 
 
-def refuse_nested_junctions(directory: str, names: list[str]) -> list[str]:
-    """``shutil.copytree`` ``ignore`` callback: refuse a junction at any level of the tree.
+def refuse_links_in_tree(directory: str, names: list[str]) -> list[str]:
+    """``shutil.copytree`` ``ignore`` callback: refuse a junction or a hard-linked file at any level.
 
     ``copytree(symlinks=True)`` copies symlinks as links but treats a junction as a
-    directory and would copy its target, which may lie outside the project.
+    directory and would copy its target, which may lie outside the project. A
+    hard-linked file is refused here too, so the refusal propagates as
+    ``UnsafeProjectPathError`` (copytree would wrap the copy function's error in a
+    ``shutil.Error``); ``copy2_refusing_hard_links`` re-checks on the open descriptor.
     """
     for name in names:
-        if _reparse_tag(Path(directory) / name) == _IO_REPARSE_TAG_MOUNT_POINT:
-            raise UnsafeProjectPathError(f"{Path(directory) / name} is a junction")
+        path = Path(directory) / name
+        if _reparse_tag(path) == _IO_REPARSE_TAG_MOUNT_POINT:
+            raise UnsafeProjectPathError(f"{path} is a junction")
+        try:
+            st = os.lstat(path)
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode) and st.st_nlink > 1:
+            raise UnsafeProjectPathError(f"{path} is not a regular file with a single link")
     return []
+
+
+def refuse_links_below(directory: Path) -> None:
+    """Raise ``UnsafeProjectPathError`` for a junction or hard-linked file anywhere below ``directory``.
+
+    Run before ``copytree``, which wraps errors raised in subdirectories (also by
+    its ``ignore`` callback) in a ``shutil.Error``; a refusal found here stays a
+    refusal. Top-down, so a junction is refused before it is descended into.
+    """
+    for dirpath, dirnames, filenames in os.walk(directory):
+        refuse_links_in_tree(dirpath, dirnames + filenames)
 
 
 def copy2_refusing_hard_links(src: str, dst: str, *, follow_symlinks: bool = True) -> str:
@@ -659,8 +680,9 @@ def copy_project_entry(project_dir: Path, source: Path, target: Path) -> None:
             if src_path.is_symlink():
                 tmp_path.symlink_to(os.readlink(src_path))
             elif src_path.is_dir():
+                refuse_links_below(src_path)
                 shutil.copytree(
-                    src_path, tmp_path, symlinks=True, ignore=refuse_nested_junctions,
+                    src_path, tmp_path, symlinks=True, ignore=refuse_links_in_tree,
                     copy_function=copy2_refusing_hard_links,
                 )
             else:

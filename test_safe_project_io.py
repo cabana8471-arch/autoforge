@@ -555,3 +555,16 @@ def test_path_fallback_copy_refuses_a_junction_nested_in_the_tree(root, monkeypa
         sio.copy_project_entry(root, root / "src", root / "copy")
     assert not (root / "copy").exists()
     assert not any(p.name.endswith(".tmp") for p in root.iterdir())
+
+
+def test_path_fallback_copy_reports_a_hard_link_in_the_tree_as_a_refusal(root, monkeypatch, tmp_path):
+    """copytree aggregates copy_function errors into shutil.Error (a 500); a refusal must stay a refusal (409)."""
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", False)
+    outside = tmp_path / "outside-secret"
+    outside.write_bytes(b"secret")
+    (root / "src" / "sub").mkdir(parents=True)
+    os.link(outside, root / "src" / "sub" / "linked.txt")
+
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.copy_project_entry(root, root / "src", root / "copy")
+    assert not (root / "copy").exists()
