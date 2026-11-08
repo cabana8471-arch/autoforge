@@ -326,3 +326,18 @@ def test_chat_answer_is_not_an_approval(approval_server):
         ws.send(json.dumps({"type": "agent_action_decision", "id": request["id"], "approved": "yes"}))
         ws.send(json.dumps({"type": "agent_action_decision", "id": request["id"], "approved": False}))
         assert _recv(ws, "text")["content"] == "declined"
+
+
+def test_closing_a_second_tab_does_not_orphan_the_first(approval_server):
+    """Tab B attaches and closes; tab A's next request must still show the card in A."""
+    with connect(approval_server) as tab_a:
+        tab_a.send(json.dumps({"type": "start"}))
+        _recv(tab_a, "response_done")
+        with connect(approval_server) as tab_b:
+            tab_b.send(json.dumps({"type": "start"}))
+            _recv(tab_b, "response_done")
+        time.sleep(0.3)  # let the server run tab B's disconnect cleanup
+        tab_a.send(json.dumps({"type": "message", "content": "start the agent"}))
+        request = _recv(tab_a, "agent_action_approval")
+        tab_a.send(json.dumps({"type": "agent_action_decision", "id": request["id"], "approved": True}))
+        assert _recv(tab_a, "text")["content"] == "approved"

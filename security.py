@@ -964,7 +964,7 @@ def validate_project_command(cmd_config: dict) -> tuple[bool, str]:
         return False, "Command must have 'name' field"
 
     name = cmd_config["name"]
-    if not isinstance(name, str) or not name:
+    if not isinstance(name, str) or not name.strip():
         return False, "Command name must be a non-empty string"
 
     # Reject bare wildcard - security measure to prevent matching all commands

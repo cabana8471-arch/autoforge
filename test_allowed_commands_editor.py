@@ -61,6 +61,12 @@ def test_invalid_config_is_reported(text, fragment):
     assert any(fragment in e for e in errors), errors
 
 
+def test_blank_name_is_refused():
+    """The loader drops the whole file for a blank name, so the editor must not save one."""
+    text = 'version: 1\ncommands:\n  - name: swift\n  - name: "   "\n'
+    assert any("commands[1]" in e for e in validate_project_config_text(text))
+
+
 def test_more_than_100_commands_is_refused():
     text = "version: 1\ncommands:\n" + "".join(f"  - name: tool{i}\n" for i in range(101))
     assert any("100" in e for e in validate_project_config_text(text))

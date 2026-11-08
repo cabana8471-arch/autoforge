@@ -326,7 +326,9 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
                                 "content": "No active session. Send 'start' first."
                             })
                             continue
-                        await use_session(session)
+                    # Re-attach every time: another tab on this session may have taken
+                    # (and on closing, cleared) the channel for Approve/Decline requests
+                    await use_session(session)
 
                     user_content = message.get("content", "").strip()
                     if not user_content:
@@ -350,7 +352,9 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
                                 "content": "No active session. Send 'start' first."
                             })
                             continue
-                        await use_session(session)
+                    # Re-attach every time: another tab on this session may have taken
+                    # (and on closing, cleared) the channel for Approve/Decline requests
+                    await use_session(session)
 
                     # Format the answers as a natural response
                     answers = message.get("answers", {})

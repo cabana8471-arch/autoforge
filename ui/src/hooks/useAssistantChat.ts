@@ -130,6 +130,9 @@ export function useAssistantChat({
 
     ws.onclose = () => {
       setConnectionStatus("disconnected");
+      // A request may settle while we are offline; the server re-sends the
+      // ones still waiting when this client reconnects and starts again.
+      setPendingApproval(null);
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
