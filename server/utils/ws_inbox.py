@@ -19,10 +19,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 # A well-behaved client pings every 30 s; this many unread messages means flooding.
 MAX_PENDING_MESSAGES = 256
 POLICY_VIOLATION = 1008
-# Close codes of a client that left on purpose: the UI's ws.close(1000) and a
-# closed or reloaded tab (1001). Not 1005: uvicorn reports a lost connection
-# (network drop, keepalive timeout) as 1005, same as a close frame without status.
-CLIENT_CLOSE_CODES = frozenset({1000, 1001})
+# Close code of a client that closed the chat on purpose: the UI's ws.close(1000)
+# from its close button. Not 1001 (a reload or closed tab: the turn finishes on the
+# server, user decision 08.11.2026) and not 1005 (uvicorn reports a lost connection,
+# e.g. a network drop or keepalive timeout, as 1005).
+CLIENT_CLOSE_CODES = frozenset({1000})
 
 
 class WebSocketInbox:

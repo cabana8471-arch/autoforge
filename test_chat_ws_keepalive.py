@@ -202,6 +202,21 @@ def test_turn_completes_when_connection_drops_mid_turn(chat_server, path):
     "/api/expand/ws/proj?mode=expand",
     "/api/spec/ws/proj",
 ])
+def test_reload_or_closed_tab_mid_turn_lets_it_finish(chat_server, path):
+    """A reload or a closed tab (1001, going away) is not a cancel: the turn finishes on the server."""
+    url, session, removed = chat_server
+    ws = connect(url + path)
+    _start_turn(ws)
+    ws.close(code=1001)
+    assert session.turn_finished.wait(timeout=TURN_SECONDS * 5)
+    assert removed == []
+    assert not session.interrupted.is_set()
+
+
+@pytest.mark.parametrize("path", [
+    "/api/expand/ws/proj?mode=expand",
+    "/api/spec/ws/proj",
+])
 def test_closing_the_chat_mid_turn_cancels_it(chat_server, path):
     """Closing the chat on purpose (close frame) stops the turn and closes the session."""
     url, session, removed = chat_server
