@@ -173,6 +173,7 @@ class FeatureResponse(FeatureBase):
     human_input_response: dict | None = None
     needs_manual_testing: bool = False
     manual_testing_notes: str | None = None
+    test_evidence: dict | None = None  # {result, summary, test_log, screenshots, recorded_at}
 
     class Config:
         from_attributes = True

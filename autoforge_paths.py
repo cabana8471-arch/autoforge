@@ -49,6 +49,9 @@ assistant.db-shm
 
 # Validation artifacts (screenshots, etc.) captured during feature verification
 validation/
+
+# Test evidence screenshots copied by the feature MCP server
+evidence/
 """
 
 

@@ -89,6 +89,11 @@ class Feature(Base):
     needs_manual_testing = Column(Boolean, nullable=False, default=False, index=True)
     manual_testing_notes = Column(Text, nullable=True, default=None)  # What the human should test
 
+    # Test evidence: how the agent verified the feature and what it found.
+    # Shape: {summary, test_log: [str], screenshots: [relative path], result, recorded_at}
+    # Intentionally excluded from to_dict() so it doesn't bloat agent context.
+    test_evidence = Column(JSON, nullable=True, default=None)
+
     def to_dict(self) -> dict:
         """Convert feature to dictionary for JSON serialization."""
         return {
@@ -592,6 +597,17 @@ def _migrate_add_manual_testing_columns(engine) -> None:
         conn.commit()
 
 
+def _migrate_add_test_evidence_column(engine) -> None:
+    """Add test_evidence column to existing databases that don't have it."""
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(features)"))
+        columns = [row[1] for row in result.fetchall()]
+
+        if "test_evidence" not in columns:
+            conn.execute(text("ALTER TABLE features ADD COLUMN test_evidence TEXT DEFAULT NULL"))
+            conn.commit()
+
+
 def _migrate_add_schedules_tables(engine) -> None:
     """Create schedules and schedule_overrides tables if they don't exist."""
     from sqlalchemy import inspect
@@ -726,6 +742,7 @@ def create_database(project_dir: Path) -> tuple:
     _migrate_add_quality_columns(engine)
     _migrate_add_regression_count_column(engine)
     _migrate_add_manual_testing_columns(engine)
+    _migrate_add_test_evidence_column(engine)
 
     # Migrate to add schedules tables
     _migrate_add_schedules_tables(engine)

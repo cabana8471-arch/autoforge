@@ -106,6 +106,15 @@ export interface HumanInputResponseData {
   responded_at?: string
 }
 
+// Test evidence recorded by an agent when verifying a feature
+export interface TestEvidence {
+  result: 'passing' | 'failing'
+  summary: string
+  test_log: string[]
+  screenshots: string[]  // Paths relative to the project directory
+  recorded_at: string
+}
+
 // Feature types
 export interface Feature {
   id: number
@@ -124,6 +133,7 @@ export interface Feature {
   human_input_response?: HumanInputResponseData | null
   needs_manual_testing?: boolean     // Code complete, waiting for a human to test it
   manual_testing_notes?: string | null
+  test_evidence?: TestEvidence | null
 }
 
 // Status type for graph nodes

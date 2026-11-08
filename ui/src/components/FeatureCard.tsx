@@ -106,6 +106,15 @@ export function FeatureCard({ feature, onClick, isInProgress, allFeatures = [], 
             <>
               <CheckCircle2 size={16} className="text-primary" />
               <span className="text-primary font-medium">Complete</span>
+              {feature.test_evidence && (
+                <span
+                  className="ml-auto flex items-center gap-1 text-xs text-muted-foreground"
+                  title="Test evidence recorded"
+                >
+                  <ClipboardCheck size={14} />
+                  Evidence
+                </span>
+              )}
             </>
           ) : feature.needs_human_input ? (
             <>
