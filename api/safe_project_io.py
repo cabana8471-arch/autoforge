@@ -241,6 +241,25 @@ def copy2_refusing_hard_links(src: str, dst: str, *, follow_symlinks: bool = Tru
     return dst
 
 
+def _refuse_hard_link(fd: int, path: Path) -> None:
+    """Path fallback: refuse an open file that is not regular or has a second link."""
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+        raise UnsafeProjectPathError(f"{path} is not a regular file with a single link")
+
+
+def _remove_link(path: Path) -> None:
+    """Remove a symlink or junction itself (a directory link needs rmdir on Windows)."""
+    try:
+        path.unlink()
+    except IsADirectoryError:
+        os.rmdir(path)
+    except PermissionError:
+        if not is_link_or_junction(path):
+            raise
+        os.rmdir(path)
+
+
 def _refuse_symlinks(project_dir: Path, relative: Path) -> Path:
     """Path-based check for platforms without dir_fd: no symlink or junction below the project."""
     current = project_dir
@@ -311,7 +330,9 @@ def open_project_file_for_write(project_dir: Path, target: Path) -> Iterator[Bin
         finally:
             os.close(dir_fd)
         return
-    path = _refuse_symlinks(project_dir, relative)
+    # Like the dir_fd branch: no link above the target; a link at the target is
+    # replaced by the rename, never written through
+    path = _refuse_symlinks(project_dir, relative.parent) / relative.name
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(tmp_name)
     try:
@@ -344,6 +365,7 @@ def append_project_file(project_dir: Path, target: Path, data: bytes) -> None:
     path = _refuse_symlinks(project_dir, relative)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "ab") as f:
+        _refuse_hard_link(f.fileno(), path)  # before writing: a second link may live outside
         f.write(data)
 
 
@@ -364,9 +386,9 @@ def create_project_file_exclusive(project_dir: Path, target: Path, data: bytes) 
         finally:
             os.close(dir_fd)
     else:
-        path = _refuse_symlinks(project_dir, relative)
+        path = _refuse_symlinks(project_dir, relative.parent) / relative.name
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, flags, 0o644)
+        fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o644)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
 
@@ -405,7 +427,9 @@ def read_project_file(project_dir: Path, target: Path) -> bytes:
             os.close(dir_fd)
         with os.fdopen(fd, "rb") as f:
             return f.read()
-    return _refuse_symlinks(project_dir, relative).read_bytes()
+    with open(_refuse_symlinks(project_dir, relative), "rb") as f:
+        _refuse_hard_link(f.fileno(), project_dir / relative)
+        return f.read()
 
 
 def check_project_file(project_dir: Path, target: Path) -> bool:
@@ -605,7 +629,9 @@ def copy_project_entry(project_dir: Path, source: Path, target: Path) -> None:
     tmp_name = f".{dst_rel.name}.{uuid.uuid4().hex}.tmp"
     if not DIR_FD_SUPPORTED:
         src_path = _refuse_symlinks(project_dir, src_rel.parent) / src_rel.name
-        dst_path = _refuse_symlinks(project_dir, dst_rel)
+        # Like the dir_fd branch: no link above the target; a link at the target
+        # itself is replaced (removed, then the copy renamed into place)
+        dst_path = _refuse_symlinks(project_dir, dst_rel.parent) / dst_rel.name
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = dst_path.with_name(tmp_name)
         try:
@@ -621,7 +647,9 @@ def copy_project_entry(project_dir: Path, source: Path, target: Path) -> None:
                 )
             else:
                 copy2_refusing_hard_links(str(src_path), str(tmp_path))
-            if dst_path.is_dir() and not dst_path.is_symlink():
+            if is_link_or_junction(dst_path):
+                _remove_link(dst_path)
+            elif dst_path.is_dir():
                 shutil.rmtree(dst_path)
             elif tmp_path.is_dir() and not tmp_path.is_symlink():
                 dst_path.unlink(missing_ok=True)

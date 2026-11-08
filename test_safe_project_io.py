@@ -268,12 +268,49 @@ def test_project_helpers_path_fallback_refuses_symlinks(root, outside, monkeypat
 
     (root / "linked").symlink_to(outside, target_is_directory=True)
     (root / "final.txt").symlink_to(outside / "victim.txt")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.write_project_file(root, root / "linked" / "x.txt", b"x")
     for target in (root / "linked" / "x.txt", root / "final.txt"):
-        with pytest.raises(sio.UnsafeProjectPathError):
-            sio.write_project_file(root, target, b"x")
         with pytest.raises(sio.UnsafeProjectPathError):
             sio.append_project_file(root, target, b"x")
     assert list(outside.iterdir()) == []
+
+
+def test_path_fallback_matches_dir_fd_semantics(root, outside, monkeypatch):
+    """The Windows fallback behaves like the dir_fd branch: a link at the target is
+    replaced (write/copy), a hard link is refused (read/append), a link is "exists" (exclusive)."""
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", False)
+    victim = outside / "victim.txt"
+    victim.write_bytes(b"keep")
+    (outside / "dir").mkdir()
+
+    (root / "final.txt").symlink_to(victim)
+    sio.write_project_file(root, root / "final.txt", b"new")
+    assert not (root / "final.txt").is_symlink() and (root / "final.txt").read_bytes() == b"new"
+
+    (root / "src.txt").write_bytes(b"copy")
+    (root / "src_dir").mkdir()
+    (root / "src_dir" / "a").write_bytes(b"a")
+    (root / "dst.txt").symlink_to(victim)
+    (root / "dst_dir").symlink_to(outside / "dir", target_is_directory=True)
+    sio.copy_project_entry(root, root / "src.txt", root / "dst.txt")
+    sio.copy_project_entry(root, root / "src_dir", root / "dst_dir")
+    assert (root / "dst.txt").read_bytes() == b"copy" and not (root / "dst.txt").is_symlink()
+    assert (root / "dst_dir" / "a").read_bytes() == b"a" and not (root / "dst_dir").is_symlink()
+
+    os.link(victim, root / "hard.txt")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.read_project_file(root, root / "hard.txt")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.append_project_file(root, root / "hard.txt", b"x")
+
+    (root / "lock").symlink_to(outside / "created")
+    with pytest.raises(FileExistsError):
+        sio.create_project_file_exclusive(root, root / "lock", b"1")
+
+    assert victim.read_bytes() == b"keep"
+    assert sorted(p.name for p in outside.iterdir()) == ["dir", "victim.txt"]
+    assert list((outside / "dir").iterdir()) == []
 
 
 def test_unlink_project_file_deletes_and_removes_final_symlink_only(root, outside):
