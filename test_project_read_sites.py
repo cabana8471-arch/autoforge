@@ -329,6 +329,20 @@ def test_security_scan_does_not_read_linked_source(project: Path, secret: Path) 
     assert _no_secret(result.to_dict())
 
 
+def test_security_scan_reports_skipped_linked_files(project: Path, secret: Path) -> None:
+    """A skipped file must show in the report: a 'clean' scan would be a false result."""
+    from security_scanner import SecurityScanner
+
+    _plant(project / "config.py", secret)
+    _plant(project / "hard.py", secret, hard=True)
+
+    result = SecurityScanner(project).scan(scan_dependencies=False, save_report=False)
+
+    assert sorted(result.skipped_files) == ["config.py", "hard.py"]
+    assert result.summary["skipped_files"] == 2
+    assert result.to_dict()["skipped_files"] == result.skipped_files
+
+
 def test_review_does_not_read_linked_source(project: Path, secret: Path) -> None:
     from review_agent import ReviewAgent
 
@@ -340,6 +354,9 @@ def test_review_does_not_read_linked_source(project: Path, secret: Path) -> None
 
     assert {issue.file_path for issue in report.issues} == {"real.py"}
     assert _no_secret(report.to_dict())
+    # Reported as skipped, not as reviewed
+    assert report.skipped_files == ["app.py"] and "app.py" not in report.files_reviewed
+    assert report.to_dict()["summary"]["skipped_files"] == 1
 
 
 def test_generated_docs_skip_linked_env_file(project: Path, secret: Path) -> None:

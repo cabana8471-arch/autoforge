@@ -26,7 +26,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from api.safe_project_io import read_project_text, write_project_file
+from api.safe_project_io import UnsafeProjectPathError, read_project_text, write_project_file
 from autoforge_paths import get_security_reports_dir
 
 
@@ -105,6 +105,9 @@ class ScanResult:
     vulnerabilities: list[Vulnerability] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
     scans_run: list[str] = field(default_factory=list)
+    # Files not scanned because they are reachable only through a symlink or hard
+    # link (they could point outside the project): reported, never silently clean
+    skipped_files: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -114,6 +117,7 @@ class ScanResult:
             "vulnerabilities": [v.to_dict() for v in self.vulnerabilities],
             "summary": self.summary,
             "scans_run": self.scans_run,
+            "skipped_files": self.skipped_files,
             "total_issues": len(self.vulnerabilities),
             "by_severity": {
                 "critical": len([v for v in self.vulnerabilities if v.severity == Severity.CRITICAL]),
@@ -392,6 +396,7 @@ class SecurityScanner:
                 v.severity in (Severity.CRITICAL, Severity.HIGH)
                 for v in result.vulnerabilities
             ),
+            "skipped_files": len(result.skipped_files),
         }
 
         if save_report:
@@ -580,6 +585,12 @@ class SecurityScanner:
         for file_path in self._iter_files(extensions, skip_dirs):
             try:
                 content = read_project_text(self.project_dir, file_path, errors="ignore")
+            except UnsafeProjectPathError:
+                self._record_skipped(result, file_path)
+                continue
+            except Exception:
+                continue
+            try:
                 lines = content.split("\n")
 
                 for pattern, title, severity, cwe_id in SECRET_PATTERNS:
@@ -633,6 +644,12 @@ class SecurityScanner:
         for file_path in self._iter_files(extensions, skip_dirs):
             try:
                 content = read_project_text(self.project_dir, file_path, errors="ignore")
+            except UnsafeProjectPathError:
+                self._record_skipped(result, file_path)
+                continue
+            except Exception:
+                continue
+            try:
                 lines = content.split("\n")
 
                 for pattern, title, vuln_type, severity, cwe_id, recommendation in CODE_PATTERNS:
@@ -653,6 +670,11 @@ class SecurityScanner:
                             )
             except Exception:
                 continue
+
+    def _record_skipped(self, result: ScanResult, file_path: Path) -> None:
+        relative = str(file_path.relative_to(self.project_dir))
+        if relative not in result.skipped_files:
+            result.skipped_files.append(relative)
 
     def _iter_files(
         self, extensions: set[str], skip_dirs: set[str]
