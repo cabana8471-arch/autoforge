@@ -13,6 +13,7 @@ in-process queue; the handler reads from the inbox instead of the socket.
 
 import asyncio
 import contextlib
+from typing import Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -29,8 +30,11 @@ CLIENT_CLOSE_CODES = frozenset({1000})
 class WebSocketInbox:
     """Receives text messages in the background: ``start()``, then ``aclose()`` in a finally."""
 
-    def __init__(self, websocket: WebSocket) -> None:
+    def __init__(self, websocket: WebSocket, intercept: Callable[[str], bool] | None = None) -> None:
         self._websocket = websocket
+        # Handles a message at once, even mid-turn, instead of queueing it; returns
+        # True when it consumed the message.
+        self._intercept = intercept
         self._queue: asyncio.Queue[str | BaseException] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
         # Set when the client closed the connection on purpose (not a network drop).
@@ -49,6 +53,8 @@ class WebSocketInbox:
         try:
             while True:
                 text = await self._websocket.receive_text()
+                if self._intercept is not None and self._intercept(text):
+                    continue
                 if self._queue.qsize() >= MAX_PENDING_MESSAGES:
                     await self._websocket.close(code=POLICY_VIOLATION, reason="Too many pending messages")
                     raise WebSocketDisconnect(code=POLICY_VIOLATION, reason="Too many pending messages")

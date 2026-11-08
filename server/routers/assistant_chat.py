@@ -210,6 +210,7 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
     - {"type": "start", "conversation_id": int | null} - Start/resume session
     - {"type": "message", "content": "..."} - Send user message
     - {"type": "answer", "answers": {...}} - Answer to structured questions
+    - {"type": "agent_action_decision", "id": str, "approved": bool} - Approve/Decline click
     - {"type": "ping"} - Keep-alive ping
 
     Server -> Client:
@@ -217,6 +218,9 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
     - {"type": "text", "content": "..."} - Text chunk from Claude
     - {"type": "tool_call", "tool": "...", "input": {...}} - Tool being called
     - {"type": "question", "questions": [...]} - Structured questions for user
+    - {"type": "agent_action_approval", "id": str, "action": "start"|"stop", "details": {...}}
+      - agent_start/agent_stop waiting for the user's click
+    - {"type": "agent_action_approval_done", "id": str, "approved": bool} - Request settled
     - {"type": "response_done"} - Response complete
     - {"type": "error", "content": "..."} - Error message
     - {"type": "pong"} - Keep-alive pong
@@ -244,9 +248,31 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
     logger.info(f"Assistant WebSocket connected for project: {project_name}")
 
     session: Optional[AssistantChatSession] = None
+
+    def handle_decision(text: str) -> bool:
+        """Deliver an Approve/Decline click to the waiting agent_start/agent_stop tool.
+
+        Runs in the inbox's reader, so the click arrives while the turn that
+        asked for it is still streaming.
+        """
+        try:
+            message = json.loads(text)
+        except ValueError:
+            return False
+        if not isinstance(message, dict) or message.get("type") != "agent_action_decision":
+            return False
+        target = session or get_session(project_name)
+        if target is not None:
+            target.approvals.resolve(str(message.get("id")), message.get("approved") is True)
+        return True
+
+    async def use_session(new_session: AssistantChatSession) -> AssistantChatSession:
+        await new_session.approvals.attach(websocket.send_json)
+        return new_session
+
     # Read the socket in the background so uvicorn keeps seeing keepalive pongs
     # while a long Claude turn is streamed from this loop.
-    inbox = WebSocketInbox(websocket)
+    inbox = WebSocketInbox(websocket, intercept=handle_decision)
     inbox.start()
 
     try:
@@ -269,11 +295,13 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
                     try:
                         # Create a new session
                         logger.debug(f"Creating session for {project_name}")
-                        session = await create_session(
+                        if session is not None:
+                            session.approvals.detach(websocket.send_json)
+                        session = await use_session(await create_session(
                             project_name,
                             project_dir,
                             conversation_id=conversation_id,
-                        )
+                        ))
                         logger.debug("Session created, starting...")
 
                         # Re-attach to a live session for the same conversation, or
@@ -298,6 +326,7 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
                                 "content": "No active session. Send 'start' first."
                             })
                             continue
+                        await use_session(session)
 
                     user_content = message.get("content", "").strip()
                     if not user_content:
@@ -321,6 +350,7 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
                                 "content": "No active session. Send 'start' first."
                             })
                             continue
+                        await use_session(session)
 
                     # Format the answers as a natural response
                     answers = message.get("answers", {})
@@ -367,3 +397,5 @@ async def assistant_chat_websocket(websocket: WebSocket, project_name: str):
     finally:
         # Don't remove session on disconnect - allow resume
         await inbox.aclose()
+        if session is not None:
+            session.approvals.detach(websocket.send_json)

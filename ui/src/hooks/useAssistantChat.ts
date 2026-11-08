@@ -4,7 +4,12 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ChatMessage, AssistantChatServerMessage, SpecQuestion } from "../lib/types";
+import type {
+  AgentActionApproval,
+  ChatMessage,
+  AssistantChatServerMessage,
+  SpecQuestion,
+} from "../lib/types";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -19,9 +24,11 @@ interface UseAssistantChatReturn {
   connectionStatus: ConnectionStatus;
   conversationId: number | null;
   currentQuestions: SpecQuestion[] | null;
+  pendingApproval: AgentActionApproval | null;
   start: (conversationId?: number | null) => void;
   sendMessage: (content: string) => void;
   sendAnswer: (answers: Record<string, string | string[]>) => void;
+  sendApprovalDecision: (id: string, approved: boolean) => void;
   disconnect: () => void;
   clearMessages: () => void;
 }
@@ -40,6 +47,7 @@ export function useAssistantChat({
     useState<ConnectionStatus>("disconnected");
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [currentQuestions, setCurrentQuestions] = useState<SpecQuestion[] | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<AgentActionApproval | null>(null);
 
   const queryClient = useQueryClient();
   const wsRef = useRef<WebSocket | null>(null);
@@ -259,6 +267,16 @@ export function useAssistantChat({
             break;
           }
 
+          case "agent_action_approval": {
+            setPendingApproval({ id: data.id, action: data.action, details: data.details });
+            break;
+          }
+
+          case "agent_action_approval_done": {
+            setPendingApproval((prev) => (prev?.id === data.id ? null : prev));
+            break;
+          }
+
           case "conversation_created": {
             setConversationId(data.conversation_id);
             break;
@@ -446,6 +464,18 @@ export function useAssistantChat({
     [onError],
   );
 
+  const sendApprovalDecision = useCallback(
+    (id: string, approved: boolean) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        onError?.("Not connected");
+        return;
+      }
+      wsRef.current.send(JSON.stringify({ type: "agent_action_decision", id, approved }));
+      setPendingApproval(null);
+    },
+    [onError],
+  );
+
   const disconnect = useCallback(() => {
     reconnectAttempts.current = maxReconnectAttempts; // Prevent reconnection
     if (pingIntervalRef.current) {
@@ -470,9 +500,11 @@ export function useAssistantChat({
     connectionStatus,
     conversationId,
     currentQuestions,
+    pendingApproval,
     start,
     sendMessage,
     sendAnswer,
+    sendApprovalDecision,
     disconnect,
     clearMessages,
   };

@@ -12,7 +12,7 @@ scheduler notifications as the UI's agent controls.
 
 import json
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
 from claude_agent_sdk.types import McpSdkServerConfig
@@ -50,6 +50,9 @@ AGENT_START_SCHEMA: dict[str, Any] = {
 
 EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 
+# Asks the user to approve an action ("start"/"stop") with its details; True = approved.
+Approver = Callable[[str, dict[str, Any]], Awaitable[bool]]
+
 
 def _result(payload: dict[str, Any], is_error: bool = False) -> dict[str, Any]:
     """Format a tool result as MCP text content."""
@@ -63,11 +66,13 @@ def _error(message: str) -> dict[str, Any]:
     return _result({"success": False, "error": message}, is_error=True)
 
 
-def build_agent_control_tools(project_name: str) -> list[SdkMcpTool[Any]]:
+def build_agent_control_tools(project_name: str, approve: Approver | None = None) -> list[SdkMcpTool[Any]]:
     """Build the agent control tools bound to a single project.
 
     The project name is captured in the closure rather than taken as a tool
     argument, so the assistant can only control its own project's agent.
+    Start and stop run only after ``approve`` returns True (the user's click in
+    the assistant panel); without an approver they are refused.
     """
     # Imported lazily: the router imports services, so a module-level import
     # here would be circular when the router package is loaded first.
@@ -86,6 +91,17 @@ def build_agent_control_tools(project_name: str) -> list[SdkMcpTool[Any]]:
         payload = response.model_dump(mode="json")
         return _result(payload, is_error=not payload.get("success", True))
 
+    async def _approved(action: str, details: dict[str, Any]) -> dict[str, Any] | None:
+        """None when the user approved ``action``, otherwise the error result to return."""
+        if approve is None:
+            return _error(f"Cannot {action} the agent: no approval channel to the user.")
+        if await approve(action, details):
+            return None
+        return _error(
+            f"The user declined (or did not answer) the request to {action} the agent. "
+            "Do not retry unless the user asks again."
+        )
+
     @tool(
         "agent_get_status",
         "Get the coding agent's current status for this project "
@@ -98,7 +114,8 @@ def build_agent_control_tools(project_name: str) -> list[SdkMcpTool[Any]]:
     @tool(
         "agent_start",
         "Start the coding agent for this project so it begins implementing pending features. "
-        "Uses the global settings (model, YOLO mode, batch size); only the concurrency can be chosen.",
+        "Uses the global settings (model, YOLO mode, batch size); only the concurrency can be chosen. "
+        "The user must approve it with a click in the assistant panel before it runs.",
         AGENT_START_SCHEMA,
     )
     async def agent_start(args: dict[str, Any]) -> dict[str, Any]:
@@ -106,14 +123,22 @@ def build_agent_control_tools(project_name: str) -> list[SdkMcpTool[Any]]:
             request = AgentStartRequest(max_concurrency=args.get("max_concurrency"))
         except ValidationError as e:
             return _error(f"Invalid arguments: {e.errors()[0].get('msg', str(e))}")
+        details = {} if request.max_concurrency is None else {"max_concurrency": request.max_concurrency}
+        refusal = await _approved("start", details)
+        if refusal is not None:
+            return refusal
         return await _run("start", lambda: agent_router.start_agent(project_name, request))
 
     @tool(
         "agent_stop",
-        "Stop the coding agent for this project immediately. Work in progress on the current feature is interrupted.",
+        "Stop the coding agent for this project immediately. Work in progress on the current feature is interrupted. "
+        "The user must approve it with a click in the assistant panel before it runs.",
         EMPTY_SCHEMA,
     )
     async def agent_stop(args: dict[str, Any]) -> dict[str, Any]:
+        refusal = await _approved("stop", {})
+        if refusal is not None:
+            return refusal
         return await _run("stop", lambda: agent_router.stop_agent(project_name))
 
     @tool(
@@ -143,10 +168,10 @@ def build_agent_control_tools(project_name: str) -> list[SdkMcpTool[Any]]:
     return [agent_get_status, agent_start, agent_stop, agent_pause, agent_resume]
 
 
-def create_agent_control_server(project_name: str) -> McpSdkServerConfig:
+def create_agent_control_server(project_name: str, approve: Approver | None = None) -> McpSdkServerConfig:
     """Create the in-process agent control MCP server for a project."""
     return create_sdk_mcp_server(
         name=AGENT_CONTROL_SERVER_NAME,
         version="1.0.0",
-        tools=build_agent_control_tools(project_name),
+        tools=build_agent_control_tools(project_name, approve),
     )

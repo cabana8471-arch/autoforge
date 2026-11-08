@@ -13,6 +13,7 @@ import { useAssistantChat } from '../hooks/useAssistantChat'
 import { ChatMessage as ChatMessageComponent } from './ChatMessage'
 import { ConversationHistory } from './ConversationHistory'
 import { QuestionOptions } from './QuestionOptions'
+import { AgentActionApprovalCard } from './AgentActionApprovalCard'
 import type { ChatMessage } from '../lib/types'
 import { isSubmitEnter } from '../lib/keyboard'
 import { Button } from '@/components/ui/button'
@@ -79,9 +80,11 @@ export function AssistantChat({
     connectionStatus,
     conversationId: activeConversationId,
     currentQuestions,
+    pendingApproval,
     start,
     sendMessage,
     sendAnswer,
+    sendApprovalDecision,
     clearMessages,
   } = useAssistantChat({
     projectName,
@@ -339,6 +342,13 @@ export function AssistantChat({
             questions={currentQuestions}
             onSubmit={sendAnswer}
           />
+        </div>
+      )}
+
+      {/* agent_start / agent_stop waiting for the user's click */}
+      {pendingApproval && (
+        <div className="border-t border-border bg-background p-4">
+          <AgentActionApprovalCard approval={pendingApproval} onDecide={sendApprovalDecision} />
         </div>
       )}
 

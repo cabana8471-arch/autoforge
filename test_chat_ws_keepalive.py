@@ -38,6 +38,9 @@ class FakeSession:
     is_ready = False
 
     def __init__(self):
+        from server.services.agent_action_approvals import AgentActionApprovals
+
+        self.approvals = AgentActionApprovals()  # used by the assistant router
         self.turn_finished = threading.Event()
         self.interrupted = threading.Event()
         self._interrupt: asyncio.Event | None = None

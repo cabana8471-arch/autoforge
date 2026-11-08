@@ -658,6 +658,23 @@ export interface AssistantChatPongMessage {
   type: 'pong'
 }
 
+// agent_start / agent_stop waiting for the user's Approve/Decline click
+export interface AgentActionApproval {
+  id: string
+  action: 'start' | 'stop'
+  details: { max_concurrency?: number }
+}
+
+export interface AssistantChatAgentActionApprovalMessage extends AgentActionApproval {
+  type: 'agent_action_approval'
+}
+
+export interface AssistantChatAgentActionApprovalDoneMessage {
+  type: 'agent_action_approval_done'
+  id: string
+  approved: boolean
+}
+
 export type AssistantChatServerMessage =
   | AssistantChatTextMessage
   | AssistantChatToolCallMessage
@@ -666,6 +683,8 @@ export type AssistantChatServerMessage =
   | AssistantChatErrorMessage
   | AssistantChatConversationCreatedMessage
   | AssistantChatPongMessage
+  | AssistantChatAgentActionApprovalMessage
+  | AssistantChatAgentActionApprovalDoneMessage
 
 // ============================================================================
 // Expand Chat Types

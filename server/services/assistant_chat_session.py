@@ -21,6 +21,7 @@ from typing import Any, AsyncGenerator, Optional
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from dotenv import load_dotenv
 
+from .agent_action_approvals import AgentActionApprovals
 from .assistant_agent_tools import (
     AGENT_CONTROL_SERVER_NAME,
     AGENT_CONTROL_TOOLS,
@@ -188,7 +189,7 @@ You typically help with one of three kinds of requests:
 - **agent_pause**: Gracefully pause the agent (it finishes current features first)
 - **agent_resume**: Resume a paused agent
 
-Only start, stop, pause or resume the agent when the user asks you to (or confirms when you offer). Check `agent_get_status` first when the current state matters, and report the result of the action back to the user.
+Only start, stop, pause or resume the agent when the user asks you to (or confirms when you offer). `agent_start` and `agent_stop` show the user an Approve/Decline prompt in the panel and wait for their click; do not ask for that confirmation again with `ask_user`, and do not retry a declined action unless the user asks again. Check `agent_get_status` first when the current state matters, and report the result of the action back to the user.
 
 **Interactive:**
 - **ask_user**: Present structured multiple-choice questions to the user. Use this when you need to clarify requirements, offer design choices, or guide a decision. The user sees clickable option buttons and their selection is returned as your next message.
@@ -267,6 +268,8 @@ class AssistantChatSession:
         # Serializes queries so a response that is still streaming (e.g. after the
         # browser disconnected) finishes and is persisted before the next one starts.
         self._query_lock = asyncio.Lock()
+        # agent_start / agent_stop wait here for the user's click in the panel
+        self.approvals = AgentActionApprovals()
 
     @property
     def is_ready(self) -> bool:
@@ -280,6 +283,7 @@ class AssistantChatSession:
 
     async def close(self) -> None:
         """Clean up resources and close the Claude client."""
+        self.approvals.cancel_all()
         if self.client and self._client_entered:
             try:
                 await self.client.__aexit__(None, None, None)
@@ -348,7 +352,9 @@ class AssistantChatSession:
         # Agent control is optional: if the in-process server can't be built
         # (e.g. an incompatible mcp package), keep the assistant usable without it.
         try:
-            mcp_servers[AGENT_CONTROL_SERVER_NAME] = create_agent_control_server(self.project_name)
+            mcp_servers[AGENT_CONTROL_SERVER_NAME] = create_agent_control_server(
+                self.project_name, self.approvals.request
+            )
         except Exception as e:
             logger.warning(
                 f"Agent control tools unavailable for {self.project_name}; "

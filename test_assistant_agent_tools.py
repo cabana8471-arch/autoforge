@@ -75,6 +75,11 @@ class FakeManager:
         return True, "Resumed"
 
 
+async def _approve_all(action: str, details: dict) -> bool:
+    """Stands in for the user's Approve click (see test_assistant_agent_approval.py)."""
+    return True
+
+
 def _payload(result: dict) -> dict:
     payload: dict = json.loads(result["content"][0]["text"])
     return payload
@@ -94,7 +99,7 @@ class TestAgentControlTools(unittest.TestCase):
         ]
         for p in self.patches:
             p.start()
-        self.tools = {t.name: t for t in build_agent_control_tools("demo")}
+        self.tools = {t.name: t for t in build_agent_control_tools("demo", approve=_approve_all)}
 
     def tearDown(self):
         for p in self.patches:
