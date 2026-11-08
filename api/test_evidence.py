@@ -20,6 +20,8 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from api import safe_project_io
+
 MAX_SUMMARY_LENGTH = 4000
 MAX_LOG_ENTRIES = 50
 MAX_LOG_ENTRY_LENGTH = 1000
@@ -61,48 +63,18 @@ def get_evidence_dir(project_dir: Path, feature_id: int) -> Path:
     return get_autoforge_dir(project_dir.resolve()) / "evidence" / f"feature_{feature_id}"
 
 
-# Where the OS supports it, evidence files are created and deleted relative to a
-# directory descriptor opened component by component with O_NOFOLLOW. The coding
-# agent can create symlinks inside the project at any moment (also between a path
-# check and its use), and this code runs outside the agent's sandbox, so a
-# check-then-use on path names is not enough.
-_DIR_FD_SUPPORTED = (
-    hasattr(os, "O_NOFOLLOW")
-    and hasattr(os, "O_DIRECTORY")
-    and os.open in os.supports_dir_fd
-    and os.mkdir in os.supports_dir_fd
-    and os.unlink in os.supports_dir_fd
-)
+# Evidence files are created, read and deleted through api.safe_project_io where
+# the OS supports dir_fd: this code runs outside the agent's sandbox, and the agent
+# can plant symlinks inside the project at any moment (also between a check and
+# its use), so checking path names first is not enough.
+_DIR_FD_SUPPORTED = safe_project_io.DIR_FD_SUPPORTED
 
 
 def _open_evidence_dir(project_dir: Path, feature_id: int, create: bool) -> int | None:
-    """Open the feature's evidence directory without following any symlink below the project root.
-
-    Returns:
-        A directory file descriptor (the caller closes it), or None when a
-        component is missing (and ``create`` is False), is a symlink or is not
-        a directory.
-    """
+    """Open the feature's evidence directory without following any symlink below the project root."""
     root = project_dir.resolve()
     parts = get_evidence_dir(project_dir, feature_id).relative_to(root).parts
-    try:
-        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-    except OSError:
-        return None
-    try:
-        for name in parts:
-            if create:
-                try:
-                    os.mkdir(name, 0o755, dir_fd=fd)
-                except FileExistsError:
-                    pass
-            next_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-        return fd
-    except OSError:
-        os.close(fd)
-        return None
+    return safe_project_io.open_dir(root, parts, create=create)
 
 
 def _safe_evidence_dir(project_dir: Path, feature_id: int) -> Path | None:
@@ -184,7 +156,10 @@ class _EvidenceWriter:
             self.unsafe = self._fd is None
         if self._fd is None:
             return None
-        src_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+        root = self.project_dir.resolve()
+        src_fd = safe_project_io.open_regular_file(root, source.relative_to(root))
+        if src_fd is None:
+            raise OSError("screenshot path changed or is no longer a regular file inside the project")
         with os.fdopen(src_fd, "rb") as src:
             dst_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=self._fd)
             with os.fdopen(dst_fd, "wb") as dst:

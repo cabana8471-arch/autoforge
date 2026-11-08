@@ -515,18 +515,25 @@ class SpecChatSession:
         content = render_spec_conversation_markdown(
             self.project_name, self.messages, self.created_at, self.complete
         ).encode("utf-8")
-        # Never follow a symlink the agent could have planted out of the project.
-        # O_NOFOLLOW refuses it at open time (no check-then-write race); without
-        # it (Windows) fall back to checking first.
-        nofollow = getattr(os, "O_NOFOLLOW", 0)
-        if not nofollow and self._summary_path.is_symlink():
-            logger.warning(f"Not writing spec conversation summary: {self._summary_path} is a symlink")
+        # Never follow a symlink or hard link the agent could have planted out of the project
+        from api import safe_project_io
+
+        if safe_project_io.DIR_FD_SUPPORTED:
+            try:
+                relative = self._summary_path.relative_to(self.project_dir)
+            except ValueError:
+                logger.warning(f"Not writing spec conversation summary outside the project: {self._summary_path}")
+                return
+            if not safe_project_io.write_file(self.project_dir.resolve(), relative, content):
+                logger.warning(f"Not writing spec conversation summary: {self._summary_path} is not safely writable")
+            return
+        # No dir_fd (Windows): path-based check
+        if self._summary_path.is_symlink() or self._summary_path.parent.resolve() != self._summary_path.parent:
+            logger.warning(f"Not writing spec conversation summary: {self._summary_path} goes through a symlink")
             return
         try:
             self._summary_path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(self._summary_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | nofollow, 0o644)
-            with os.fdopen(fd, "wb") as f:
-                f.write(content)
+            self._summary_path.write_bytes(content)
         except OSError as e:
             logger.warning(f"Failed to write spec conversation summary: {e}")
 

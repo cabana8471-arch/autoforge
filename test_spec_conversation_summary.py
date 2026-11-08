@@ -88,6 +88,21 @@ class TestSaveConversationSummary(unittest.TestCase):
 
             assert outside.read_text(encoding="utf-8") == "keep"
 
+    def test_does_not_write_through_symlinked_prompts_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp) / "project"
+            (project_dir / ".autoforge").mkdir(parents=True)
+            outside = Path(tmp) / "outside"
+            outside.mkdir()
+            (project_dir / ".autoforge" / "prompts").symlink_to(outside, target_is_directory=True)
+
+            session = SpecChatSession("p", project_dir)
+            session._summary_path = project_dir / ".autoforge" / "prompts" / SPEC_CONVERSATION_FILENAME
+            session.messages.append({"role": "user", "content": "Build a blog"})
+            session._save_conversation_summary()
+
+            assert list(outside.iterdir()) == []
+
 
 if __name__ == "__main__":
     unittest.main()

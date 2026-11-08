@@ -137,6 +137,7 @@ python -m pytest test_feature_report_bug.py    # Assistant bug reports reopen th
 python -m pytest test_spec_conversation_summary.py  # Spec chat transcript (spec_input_summary.md)
 python -m pytest test_test_evidence.py         # Test evidence: screenshot copies, symlink safety, pruning, endpoint
 python -m pytest test_project_import.py        # Re-register an AutoForge folder (API, wizard detection, CLI option 4)
+python -m pytest test_safe_project_io.py       # No-follow project I/O used outside the agent sandbox
 ```
 
 ### React UI
@@ -192,6 +193,7 @@ Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publi
 - `quality_gates.py` - Lint/type-check auto-detection and enforcement before `feature_mark_passing`
 - `api/database.py` - SQLAlchemy models (Feature, Schedule, ScheduleOverride)
 - `api/test_evidence.py` - Test evidence normalization; screenshots copied to `.autoforge/evidence/feature_<id>/`, shown in the feature modal
+- `api/safe_project_io.py` - Reads/writes project files from outside the agent sandbox without following agent-planted symlinks or hard links (dir_fd + O_NOFOLLOW walk, atomic replace)
 - `api/dependency_resolver.py` - Cycle detection (Kahn's algorithm + DFS) and dependency validation
 - `api/migration.py` - JSON-to-SQLite migration utility
 

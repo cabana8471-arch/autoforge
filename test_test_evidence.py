@@ -193,6 +193,32 @@ class TestBuildTestEvidence:
         assert evidence["screenshots"] == [".playwright-cli/page.png"]
         assert warnings
 
+    def test_source_dir_swapped_after_resolution_is_not_read(self, project_dir, screenshot, tmp_path, monkeypatch):
+        # Race: the screenshot's folder is replaced by a symlink to outside data after
+        # its path was validated. The copy must not pull the outside file into evidence.
+        import api.test_evidence as te
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "page.png").write_bytes(b"SECRET")
+        shots = project_dir / ".playwright-cli"
+        real_resolve = te.resolve_screenshot_path
+
+        def resolve_then_swap(project, raw):
+            result = real_resolve(project, raw)
+            if not shots.is_symlink():
+                (shots / "page.png").unlink()
+                shots.rmdir()
+                shots.symlink_to(outside, target_is_directory=True)
+            return result
+
+        monkeypatch.setattr(te, "resolve_screenshot_path", resolve_then_swap)
+        evidence, warnings = build_test_evidence(project_dir, 8, "passing", screenshots=[".playwright-cli/page.png"])
+
+        copies = list((project_dir / ".autoforge" / "evidence" / "feature_8").glob("*"))
+        assert all(c.read_bytes() != b"SECRET" for c in copies)
+        assert warnings
+
     @pytest.mark.parametrize("level", ["autoforge", "evidence", "feature"])
     def test_prune_never_deletes_through_a_symlinked_component(self, project_dir, tmp_path, level):
         outside = tmp_path / "outside"
