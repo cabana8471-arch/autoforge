@@ -18,6 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from api.safe_project_io import write_project_file
 from autoforge_paths import get_prompts_dir
 
 logger = logging.getLogger(__name__)
@@ -265,8 +266,8 @@ async def apply_template(request: ApplyRequest):
         if any(project_dir_str.startswith(p) for p in sensitive_paths):
             raise HTTPException(status_code=400, detail="Invalid project directory: cannot write to system paths")
 
+        project_dir.mkdir(parents=True, exist_ok=True)
         prompts_dir = get_prompts_dir(project_dir)
-        prompts_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate and save app_spec.txt
         app_spec_content = generate_app_spec(
@@ -276,8 +277,8 @@ async def apply_template(request: ApplyRequest):
         )
 
         app_spec_path = prompts_dir / "app_spec.txt"
-        with open(app_spec_path, "w") as f:
-            f.write(app_spec_content)
+        # The folder may be an existing project: never write through a link planted in it
+        write_project_file(project_dir, app_spec_path, app_spec_content.encode("utf-8"))
 
         features = generate_features(template)
 

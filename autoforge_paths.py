@@ -126,12 +126,17 @@ def ensure_autoforge_dir(project_dir: Path) -> Path:
 
     Returns:
         The path to the ``.autoforge`` directory.
-    """
-    autoforge_dir = get_autoforge_dir(project_dir)
-    autoforge_dir.mkdir(parents=True, exist_ok=True)
 
-    gitignore_path = autoforge_dir / ".gitignore"
-    gitignore_path.write_text(_GITIGNORE_CONTENT, encoding="utf-8")
+    Raises:
+        OSError: The ``.gitignore`` could not be written (``UnsafeProjectPathError``
+            when ``.autoforge`` is a symlink the agent planted).
+    """
+    from api.safe_project_io import write_project_file
+
+    autoforge_dir = get_autoforge_dir(project_dir)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    # Creates .autoforge/ if needed; never writes through a link planted in the project
+    write_project_file(project_dir, autoforge_dir / ".gitignore", _GITIGNORE_CONTENT.encode("utf-8"))
 
     return autoforge_dir
 
@@ -313,8 +318,10 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         A list of human-readable descriptions of what was migrated, e.g.
         ``["prompts/ -> .autoforge/prompts/", "features.db -> .autoforge/features.db"]``.
         An empty list means nothing was migrated (either everything is
-        already migrated, or the agent is running).
+        already migrated, the agent is running, or ``.autoforge`` is a symlink).
     """
+    from api.safe_project_io import read_project_file, write_project_file
+
     # Safety: refuse to migrate while an agent is running
     if has_agent_running(project_dir):
         logger.warning("Migration skipped: agent or dev-server is running for %s", project_dir)
@@ -324,6 +331,11 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
     old_autocoder_dir = project_dir / ".autocoder"
     new_autoforge_dir = project_dir / ".autoforge"
     migrated: list[str] = []
+    # Every step below moves or copies files into .autoforge/: a symlink there
+    # would send them out of the project
+    if new_autoforge_dir.is_symlink():
+        logger.warning("Migration skipped: %s is a symlink", new_autoforge_dir)
+        return []
     # Never follow symlinks: this runs outside the agent's sandbox, and a legacy
     # path the agent turned into a symlink would make us move or copy files from
     # anywhere into the project.
@@ -348,7 +360,9 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         old_prompts = project_dir / "prompts"
         new_prompts = autoforge_dir / "prompts"
         if old_prompts.is_dir() and not old_prompts.is_symlink() and not new_prompts.exists():
-            shutil.copytree(str(old_prompts), str(new_prompts))
+            # symlinks=True copies links as links: a link planted inside prompts/
+            # must not copy a file from outside the project into it
+            shutil.copytree(str(old_prompts), str(new_prompts), symlinks=True)
             shutil.rmtree(str(old_prompts))
             migrated.append("prompts/ -> .autoforge/prompts/")
             logger.info("Migrated prompts/ -> .autoforge/prompts/")
@@ -370,8 +384,9 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
                 finally:
                     conn.close()
 
-                # Copy the main database file (WAL is now flushed)
-                shutil.copy2(str(old_db), str(new_db))
+                # Copy the main database file (WAL is now flushed), never reading
+                # through a hard link or writing through a link planted at new_db
+                write_project_file(project_dir, new_db, read_project_file(project_dir, old_db))
 
                 # Verify the copy is intact
                 verify_conn = sqlite3.connect(str(new_db))

@@ -155,14 +155,13 @@ def _save_config(project_dir: Path, config: dict) -> None:
     Raises:
         OSError: If the file cannot be written.
     """
+    from api.safe_project_io import write_project_file
+
     config_path = _get_config_path(project_dir)
 
-    # Ensure the .autoforge directory exists
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
     try:
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        # Creates the .autoforge directory if needed; never writes through a planted link
+        write_project_file(project_dir, config_path, json.dumps(config, indent=2).encode("utf-8"))
         logger.debug("Saved config to %s", config_path)
     except OSError as e:
         logger.error("Failed to save config to %s: %s", config_path, e)

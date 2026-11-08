@@ -389,12 +389,12 @@ class ExpandChatSession:
                 "deny": denied_tools,
             },
         }
+        from api.safe_project_io import write_project_file
         from autoforge_paths import get_expand_settings_path
         settings_file = get_expand_settings_path(self.project_dir, uuid.uuid4().hex)
-        settings_file.parent.mkdir(parents=True, exist_ok=True)
         self._settings_file = settings_file
-        with open(settings_file, "w", encoding="utf-8") as f:
-            json.dump(security_settings, f, indent=2)
+        # Never through a link the agent planted in the project (raises when refused)
+        write_project_file(self.project_dir, settings_file, json.dumps(security_settings, indent=2).encode("utf-8"))
 
         # Replace $ARGUMENTS with absolute project path
         project_path = str(self.project_dir.resolve())

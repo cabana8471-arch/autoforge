@@ -100,3 +100,139 @@ def test_write_file_does_not_write_through_final_symlink_or_hardlink(root, outsi
 
     assert target.read_bytes() == b"keep"
     assert (root / "link.md").read_bytes() == b"x" and not (root / "link.md").is_symlink()
+
+
+# ---------------------------------------------------------------------------
+# Project-level helpers (target path below a project directory)
+# ---------------------------------------------------------------------------
+
+
+def test_write_project_file_writes_and_replaces_final_links(root, outside):
+    victim = outside / "victim.txt"
+    victim.write_bytes(b"keep")
+    (root / ".autoforge").mkdir()
+    (root / ".autoforge" / "link.json").symlink_to(victim)
+    os.link(victim, root / ".autoforge" / "hard.json")
+
+    sio.write_project_file(root, root / ".autoforge" / "link.json", b"x")
+    sio.write_project_file(root, root / ".autoforge" / "hard.json", b"x")
+    sio.write_project_file(root, root / "new" / "dir" / "file.txt", b"y")
+
+    assert victim.read_bytes() == b"keep"
+    assert (root / ".autoforge" / "link.json").read_bytes() == b"x"
+    assert (root / "new" / "dir" / "file.txt").read_bytes() == b"y"
+
+
+def test_write_project_file_refuses_symlinked_parent_and_outside_target(root, outside):
+    (root / ".autoforge").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.write_project_file(root, root / ".autoforge" / "settings.json", b"x")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.write_project_file(root, outside / "settings.json", b"x")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.write_project_file(root, root / ".." / "outside" / "settings.json", b"x")
+    assert list(outside.iterdir()) == []
+
+
+def test_write_project_file_accepts_unresolved_project_dir(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)  # the project root itself is trusted
+    sio.write_project_file(alias, alias / "a.txt", b"1")
+    sio.write_project_file(alias, real.resolve() / "b.txt", b"2")
+    assert (real / "a.txt").read_bytes() == b"1" and (real / "b.txt").read_bytes() == b"2"
+
+
+def test_append_project_file_appends_and_creates(root):
+    target = root / ".gitignore"
+    sio.append_project_file(root, target, b"a\n")
+    sio.append_project_file(root, target, b"b\n")
+    assert target.read_bytes() == b"a\nb\n"
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "parent"])
+def test_append_project_file_refuses_links(root, outside, kind):
+    victim = outside / "victim.txt"
+    victim.write_bytes(b"keep")
+    if kind == "symlink":
+        target = root / ".gitignore"
+        target.symlink_to(victim)
+    elif kind == "hardlink":
+        target = root / ".gitignore"
+        os.link(victim, target)
+    else:
+        (root / "sub").symlink_to(outside, target_is_directory=True)
+        target = root / "sub" / "victim.txt"
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.append_project_file(root, target, b"x")
+    assert victim.read_bytes() == b"keep"
+
+
+def test_create_project_file_exclusive(root, outside):
+    lock = root / ".autoforge" / ".agent.lock"
+    sio.create_project_file_exclusive(root, lock, b"123")
+    assert lock.read_bytes() == b"123"
+    with pytest.raises(FileExistsError):
+        sio.create_project_file_exclusive(root, lock, b"456")
+
+    dangling = root / ".autoforge" / ".other.lock"
+    dangling.symlink_to(outside / "created-outside")
+    with pytest.raises(FileExistsError):
+        sio.create_project_file_exclusive(root, dangling, b"x")
+    assert list(outside.iterdir()) == []
+
+
+def test_make_project_dirs(root, outside):
+    sio.make_project_dirs(root, root / ".autoforge" / "validation")
+    assert (root / ".autoforge" / "validation").is_dir()
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.make_project_dirs(root, root / "linked" / "validation")
+    assert list(outside.iterdir()) == []
+
+
+def test_read_project_file_refuses_links(root, outside):
+    (outside / "id_rsa").write_bytes(b"secret")
+    (root / "spec.txt").write_bytes(b"spec")
+    assert sio.read_project_file(root, root / "spec.txt") == b"spec"
+    (root / "sym.txt").symlink_to(outside / "id_rsa")
+    os.link(outside / "id_rsa", root / "hard.txt")
+    for name in ("sym.txt", "hard.txt"):
+        with pytest.raises(sio.UnsafeProjectPathError):
+            sio.read_project_file(root, root / name)
+    with pytest.raises(FileNotFoundError):
+        sio.read_project_file(root, root / "missing.txt")
+
+
+def test_copy_tree_into_project(root, outside, tmp_path):
+    source = tmp_path / "source"
+    (source / "references").mkdir(parents=True)
+    (source / "SKILL.md").write_bytes(b"skill")
+    (source / "references" / "a.md").write_bytes(b"a")
+
+    sio.copy_tree_into_project(root, source, root / ".claude" / "skills" / "tool")
+    assert (root / ".claude" / "skills" / "tool" / "SKILL.md").read_bytes() == b"skill"
+    assert (root / ".claude" / "skills" / "tool" / "references" / "a.md").read_bytes() == b"a"
+
+    (root / ".claude" / "skills" / "other").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.copy_tree_into_project(root, source, root / ".claude" / "skills" / "other")
+    assert list(outside.iterdir()) == []
+
+
+def test_project_helpers_path_fallback_refuses_symlinks(root, outside, monkeypatch):
+    """Without dir_fd (Windows) the helpers fall back to a path-based symlink check."""
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", False)
+    sio.write_project_file(root, root / "a" / "file.txt", b"1")
+    sio.append_project_file(root, root / "a" / "file.txt", b"2")
+    assert sio.read_project_file(root, root / "a" / "file.txt") == b"12"
+
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    (root / "final.txt").symlink_to(outside / "victim.txt")
+    for target in (root / "linked" / "x.txt", root / "final.txt"):
+        with pytest.raises(sio.UnsafeProjectPathError):
+            sio.write_project_file(root, target, b"x")
+        with pytest.raises(sio.UnsafeProjectPathError):
+            sio.append_project_file(root, target, b"x")
+    assert list(outside.iterdir()) == []

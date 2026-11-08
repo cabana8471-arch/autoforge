@@ -434,12 +434,12 @@ def create_client(
     # Ensure project directory exists before creating settings file
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write settings to a file in the project directory
+    # Write settings to a file in the project directory, never through a link the
+    # agent planted there (a refused write raises: the CLI must not start without them)
+    from api.safe_project_io import write_project_file
     from autoforge_paths import get_claude_settings_path
     settings_file = get_claude_settings_path(project_dir)
-    settings_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(settings_file, "w") as f:
-        json.dump(security_settings, f, indent=2)
+    write_project_file(project_dir, settings_file, json.dumps(security_settings, indent=2).encode("utf-8"))
 
     print(f"Created security settings at {settings_file}")
     print("   - Sandbox enabled (OS-level bash isolation)")

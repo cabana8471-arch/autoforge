@@ -201,7 +201,6 @@ class AgentProcessManager:
         Returns:
             True if lock was created successfully, False if lock already exists.
         """
-        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.process:
             return False
 
@@ -210,12 +209,10 @@ class AgentProcessManager:
             create_time = psutil.Process(self.process.pid).create_time()
             lock_content = f"{self.process.pid}:{create_time}"
 
-            # Atomic lock creation using O_CREAT | O_EXCL
-            # This prevents TOCTOU race conditions
-            import os
-            fd = os.open(str(self.lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, lock_content.encode())
-            os.close(fd)
+            # Atomic lock creation using O_CREAT | O_EXCL (prevents TOCTOU races),
+            # never through a symlinked directory the agent planted in the project
+            from api.safe_project_io import create_project_file_exclusive
+            create_project_file_exclusive(self.project_dir, self.lock_file, lock_content.encode())
             return True
         except FileExistsError:
             # Another process beat us to it
@@ -239,13 +236,16 @@ class AgentProcessManager:
             return
         try:
             import json
-            config = json.loads(config_file.read_text(encoding="utf-8"))
+
+            from api.safe_project_io import read_project_file, write_project_file
+            # Read and write without following links the agent may have planted
+            config = json.loads(read_project_file(self.project_dir, config_file).decode("utf-8"))
             launch_opts = config.get("browser", {}).get("launchOptions", {})
             if launch_opts.get("headless") == headless:
                 return  # already correct
             launch_opts["headless"] = headless
             config.setdefault("browser", {})["launchOptions"] = launch_opts
-            config_file.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+            write_project_file(self.project_dir, config_file, (json.dumps(config, indent=2) + "\n").encode("utf-8"))
             logger.info("Set playwright headless=%s for %s", headless, self.project_name)
         except Exception:
             logger.warning("Failed to update playwright config", exc_info=True)
@@ -653,10 +653,10 @@ class AgentProcessManager:
             return False, "Agent is not running"
 
         try:
+            from api.safe_project_io import write_project_file
             from autoforge_paths import get_pause_drain_path
             drain_path = get_pause_drain_path(self.project_dir)
-            drain_path.parent.mkdir(parents=True, exist_ok=True)
-            drain_path.write_text(str(self.process.pid))
+            write_project_file(self.project_dir, drain_path, str(self.process.pid).encode())
             self.status = "pausing"
             return True, "Graceful pause requested"
         except Exception as e:

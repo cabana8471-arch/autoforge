@@ -6,7 +6,6 @@ Automatically migrates existing feature_list.json files to SQLite database.
 """
 
 import json
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,6 +13,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.database import Feature
+from api.safe_project_io import write_project_file
 
 
 def migrate_json_to_sqlite(
@@ -106,7 +106,9 @@ def migrate_json_to_sqlite(
     backup_file = project_dir / f"feature_list.json.backup.{timestamp}"
 
     try:
-        shutil.move(json_file, backup_file)
+        # A plain rename in the same directory: unlike shutil.move it never moves the
+        # file into (or copies it across) a symlinked directory planted at the backup name
+        json_file.rename(backup_file)
         print(f"Original JSON backed up to: {backup_file.name}")
     except IOError as e:
         print(f"Warning: Could not backup JSON file: {e}")
@@ -128,10 +130,14 @@ def export_to_json(
     Args:
         project_dir: Directory containing the project
         session_maker: SQLAlchemy session maker
-        output_file: Output file path (default: feature_list_export.json)
+        output_file: Output file path inside project_dir (default: feature_list_export.json)
 
     Returns:
         Path to the exported file
+
+    Raises:
+        OSError: The file could not be written (UnsafeProjectPathError when it is
+            outside the project or would be written through a symlinked directory)
     """
     if output_file is None:
         output_file = project_dir / "feature_list_export.json"
@@ -146,8 +152,7 @@ def export_to_json(
 
         features_data = [f.to_dict() for f in features]
 
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(features_data, f, indent=2)
+        write_project_file(project_dir, output_file, json.dumps(features_data, indent=2).encode("utf-8"))
 
         print(f"Exported {len(features_data)} features to {output_file}")
         return output_file

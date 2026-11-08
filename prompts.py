@@ -10,14 +10,31 @@ Fallback chain:
 """
 
 import re
-import shutil
 from pathlib import Path
+
+from api.safe_project_io import (
+    append_project_file,
+    copy_tree_into_project,
+    make_project_dirs,
+    read_project_file,
+    write_project_file,
+)
 
 # Base templates location (generic templates)
 TEMPLATES_DIR = Path(__file__).parent / ".claude" / "templates"
 
 # Migration version — bump when adding new migration steps
 CURRENT_MIGRATION_VERSION = 4
+
+# Scaffolding and migrations run outside the agent's sandbox: every project file
+# they write, append to or copy goes through api.safe_project_io, so a symlink or
+# hard link the agent planted in the project is never followed out of it.
+
+
+def _read_project_text(project_dir: Path, path: Path) -> str:
+    """Read a project text file without following links (newlines normalized like read_text)."""
+    text = read_project_file(project_dir, path).decode("utf-8")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def get_project_prompts_dir(project_dir: Path) -> Path:
@@ -472,7 +489,8 @@ def scaffold_project_prompts(project_dir: Path) -> Path:
         The path to the project prompts directory
     """
     project_prompts = get_project_prompts_dir(project_dir)
-    project_prompts.mkdir(parents=True, exist_ok=True)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    make_project_dirs(project_dir, project_prompts)
 
     # Create .autoforge directory with .gitignore for runtime files
     from autoforge_paths import ensure_autoforge_dir
@@ -480,7 +498,7 @@ def scaffold_project_prompts(project_dir: Path) -> Path:
 
     # Create .autoforge/validation/ for verification screenshots (gitignored)
     from autoforge_paths import get_validation_dir
-    get_validation_dir(project_dir).mkdir(parents=True, exist_ok=True)
+    make_project_dirs(project_dir, get_validation_dir(project_dir))
 
     # Define template mappings: (source_template, destination_name)
     templates = [
@@ -498,7 +516,7 @@ def scaffold_project_prompts(project_dir: Path) -> Path:
         # Only copy if template exists and destination doesn't
         if template_path.exists() and not dest_path.exists():
             try:
-                shutil.copy(template_path, dest_path)
+                write_project_file(project_dir, dest_path, template_path.read_bytes())
                 copied_files.append(dest_name)
             except (OSError, PermissionError) as e:
                 print(f"  Warning: Could not copy {dest_name}: {e}")
@@ -512,7 +530,7 @@ def scaffold_project_prompts(project_dir: Path) -> Path:
     skills_dest = project_dir / ".claude" / "skills" / "playwright-cli"
     if skills_src.exists() and not skills_dest.exists():
         try:
-            shutil.copytree(skills_src, skills_dest)
+            copy_tree_into_project(project_dir, skills_src, skills_dest)
             copied_files.append(".claude/skills/playwright-cli/")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not copy playwright-cli skill: {e}")
@@ -528,13 +546,14 @@ def scaffold_project_prompts(project_dir: Path) -> Path:
             pass
     missing_entries = [e for e in entries_to_add if e not in existing_lines]
     if missing_entries:
+        # Add newline before entries if file doesn't end with one
+        separator = "\n" if existing_lines and existing_lines[-1].strip() else ""
         try:
-            with open(project_gitignore, "a", encoding="utf-8") as f:
-                # Add newline before entries if file doesn't end with one
-                if existing_lines and existing_lines[-1].strip():
-                    f.write("\n")
-                for entry in missing_entries:
-                    f.write(f"{entry}\n")
+            append_project_file(
+                project_dir,
+                project_gitignore,
+                (separator + "".join(f"{entry}\n" for entry in missing_entries)).encode("utf-8"),
+            )
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not update .gitignore: {e}")
 
@@ -543,7 +562,6 @@ def scaffold_project_prompts(project_dir: Path) -> Path:
     playwright_config_file = playwright_config_dir / "cli.config.json"
     if not playwright_config_file.exists():
         try:
-            playwright_config_dir.mkdir(parents=True, exist_ok=True)
             import json
             config = {
                 "browser": {
@@ -558,9 +576,9 @@ def scaffold_project_prompts(project_dir: Path) -> Path:
                     "isolated": True,
                 },
             }
-            with open(playwright_config_file, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2)
-                f.write("\n")
+            write_project_file(
+                project_dir, playwright_config_file, (json.dumps(config, indent=2) + "\n").encode("utf-8")
+            )
             copied_files.append(".playwright/cli.config.json")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not create playwright config: {e}")
@@ -592,8 +610,7 @@ def _ensure_allowed_commands_file(project_dir: Path) -> bool:
     if not template.exists() or dest.exists() or legacy.exists():
         return False
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(template, dest)
+        write_project_file(project_dir, dest, template.read_bytes())
         return True
     except (OSError, PermissionError) as e:
         print(f"  Warning: Could not copy allowed_commands.yaml: {e}")
@@ -697,7 +714,8 @@ def copy_spec_to_project(project_dir: Path) -> None:
     project_spec = project_prompts / "app_spec.txt"
     if project_spec.exists():
         try:
-            shutil.copy(project_spec, spec_dest)
+            # Both ends are agent-writable: neither is followed through a link
+            write_project_file(project_dir, spec_dest, read_project_file(project_dir, project_spec))
             print("Copied app_spec.txt to project directory")
             return
         except (OSError, PermissionError) as e:
@@ -901,8 +919,7 @@ def _set_migration_version(project_dir: Path, version: int) -> None:
     """Write the migration version to .autoforge/.migration_version."""
     from autoforge_paths import get_autoforge_dir
     version_file = get_autoforge_dir(project_dir) / ".migration_version"
-    version_file.parent.mkdir(parents=True, exist_ok=True)
-    version_file.write_text(str(version))
+    write_project_file(project_dir, version_file, str(version).encode("utf-8"))
 
 
 def _migrate_coding_prompt_to_cli(content: str) -> str:
@@ -993,7 +1010,7 @@ def _migrate_v0_to_v1(project_dir: Path) -> list[str]:
     skills_dest = project_dir / ".claude" / "skills" / "playwright-cli"
     if skills_src.exists() and not skills_dest.exists():
         try:
-            shutil.copytree(skills_src, skills_dest)
+            copy_tree_into_project(project_dir, skills_src, skills_dest)
             migrated.append("Copied playwright-cli skill")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not copy playwright-cli skill: {e}")
@@ -1003,7 +1020,6 @@ def _migrate_v0_to_v1(project_dir: Path) -> list[str]:
     playwright_config_file = playwright_config_dir / "cli.config.json"
     if not playwright_config_file.exists():
         try:
-            playwright_config_dir.mkdir(parents=True, exist_ok=True)
             config = {
                 "browser": {
                     "browserName": "chromium",
@@ -1017,9 +1033,9 @@ def _migrate_v0_to_v1(project_dir: Path) -> list[str]:
                     "isolated": True,
                 },
             }
-            with open(playwright_config_file, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2)
-                f.write("\n")
+            write_project_file(
+                project_dir, playwright_config_file, (json.dumps(config, indent=2) + "\n").encode("utf-8")
+            )
             migrated.append("Created .playwright/cli.config.json")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not create playwright config: {e}")
@@ -1035,12 +1051,13 @@ def _migrate_v0_to_v1(project_dir: Path) -> list[str]:
             pass
     missing_entries = [e for e in entries_to_add if e not in existing_lines]
     if missing_entries:
+        separator = "\n" if existing_lines and existing_lines[-1].strip() else ""
         try:
-            with open(project_gitignore, "a", encoding="utf-8") as f:
-                if existing_lines and existing_lines[-1].strip():
-                    f.write("\n")
-                for entry in missing_entries:
-                    f.write(f"{entry}\n")
+            append_project_file(
+                project_dir,
+                project_gitignore,
+                (separator + "".join(f"{entry}\n" for entry in missing_entries)).encode("utf-8"),
+            )
             migrated.append(f"Added {', '.join(missing_entries)} to .gitignore")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not update .gitignore: {e}")
@@ -1052,11 +1069,11 @@ def _migrate_v0_to_v1(project_dir: Path) -> list[str]:
     coding_prompt_path = prompts_dir / "coding_prompt.md"
     if coding_prompt_path.exists():
         try:
-            content = coding_prompt_path.read_text(encoding="utf-8")
+            content = _read_project_text(project_dir, coding_prompt_path)
             if "Playwright MCP" in content or "browser_navigate" in content or "browser_take_screenshot" in content:
                 updated = _migrate_coding_prompt_to_cli(content)
                 if updated != content:
-                    coding_prompt_path.write_text(updated, encoding="utf-8")
+                    write_project_file(project_dir, coding_prompt_path, updated.encode("utf-8"))
                     migrated.append("Updated coding_prompt.md to Playwright CLI")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not update coding_prompt.md: {e}")
@@ -1065,11 +1082,11 @@ def _migrate_v0_to_v1(project_dir: Path) -> list[str]:
     testing_prompt_path = prompts_dir / "testing_prompt.md"
     if testing_prompt_path.exists():
         try:
-            content = testing_prompt_path.read_text(encoding="utf-8")
+            content = _read_project_text(project_dir, testing_prompt_path)
             if "browser_navigate" in content or "browser_take_screenshot" in content:
                 updated = _migrate_testing_prompt_to_cli(content)
                 if updated != content:
-                    testing_prompt_path.write_text(updated, encoding="utf-8")
+                    write_project_file(project_dir, testing_prompt_path, updated.encode("utf-8"))
                     migrated.append("Updated testing_prompt.md to Playwright CLI")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not update testing_prompt.md: {e}")
@@ -1106,7 +1123,7 @@ def _migrate_v2_to_v3(project_dir: Path) -> list[str]:
         ensure_autoforge_dir(project_dir)
         validation_dir = get_validation_dir(project_dir)
         if not validation_dir.exists():
-            validation_dir.mkdir(parents=True, exist_ok=True)
+            make_project_dirs(project_dir, validation_dir)
             migrated.append("Created .autoforge/validation/")
     except (OSError, PermissionError) as e:
         print(f"  Warning: Could not create .autoforge/validation/: {e}")
@@ -1122,10 +1139,10 @@ def _migrate_v2_to_v3(project_dir: Path) -> list[str]:
         if prompt_path.is_symlink() or not prompt_path.exists():
             continue
         try:
-            content = prompt_path.read_text(encoding="utf-8")
+            content = _read_project_text(project_dir, prompt_path)
             updated = _apply_replacements(content, replacements)
             if updated != content:
-                prompt_path.write_text(updated, encoding="utf-8")
+                write_project_file(project_dir, prompt_path, updated.encode("utf-8"))
                 migrated.append(f"Updated {filename} to save screenshots in .autoforge/validation/")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not update {filename}: {e}")
@@ -1212,10 +1229,10 @@ def _migrate_v3_to_v4(project_dir: Path) -> list[str]:
     if testing_prompt_path.is_symlink() or not testing_prompt_path.exists():
         return migrated
     try:
-        content = testing_prompt_path.read_text(encoding="utf-8")
+        content = _read_project_text(project_dir, testing_prompt_path)
         updated = _migrate_testing_prompt_to_v4(content)
         if updated != content:
-            testing_prompt_path.write_text(updated, encoding="utf-8")
+            write_project_file(project_dir, testing_prompt_path, updated.encode("utf-8"))
             migrated.append("Updated testing_prompt.md with command-line verification for non-web projects")
     except (OSError, PermissionError) as e:
         print(f"  Warning: Could not update testing_prompt.md: {e}")

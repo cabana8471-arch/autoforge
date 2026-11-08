@@ -305,11 +305,11 @@ class AssistantChatSession:
                 "deny": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"],
             },
         }
+        from api.safe_project_io import write_project_file
         from autoforge_paths import get_claude_assistant_settings_path
         settings_file = get_claude_assistant_settings_path(self.project_dir)
-        settings_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(settings_file, "w") as f:
-            json.dump(security_settings, f, indent=2)
+        # Never through a link the agent planted in the project (raises when refused)
+        write_project_file(self.project_dir, settings_file, json.dumps(security_settings, indent=2).encode("utf-8"))
 
         # Build MCP servers config - only features MCP for read-only access
         mcp_servers = {

@@ -226,9 +226,14 @@ class DevServerProcessManager:
 
     def _create_lock(self) -> None:
         """Create lock file with current process PID."""
-        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
         if self.process:
-            self.lock_file.write_text(str(self.process.pid))
+            from api.safe_project_io import write_project_file
+            try:
+                # Never through a link the agent planted in the project
+                write_project_file(self.project_dir, self.lock_file, str(self.process.pid).encode())
+            except OSError as e:
+                # The server is already running; failing start() here would orphan it
+                logger.warning(f"Failed to create dev server lock file: {e}")
 
     def _remove_lock(self) -> None:
         """Remove lock file."""

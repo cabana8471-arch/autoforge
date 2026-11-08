@@ -445,13 +445,14 @@ async def update_project_prompts(name: str, prompts: ProjectPromptsUpdate):
     if not project_dir.exists():
         raise HTTPException(status_code=404, detail="Project directory not found")
 
+    from api.safe_project_io import write_project_file
+
     prompts_dir = _get_project_prompts_dir(project_dir)
-    prompts_dir.mkdir(parents=True, exist_ok=True)
 
     def write_file(filename: str, content: str | None):
         if content is not None:
-            filepath = prompts_dir / filename
-            filepath.write_text(content, encoding="utf-8")
+            # Never through a link the agent planted in the project
+            write_project_file(project_dir, prompts_dir / filename, content.encode("utf-8"))
 
     write_file("app_spec.txt", prompts.app_spec)
     write_file("initializer_prompt.md", prompts.initializer_prompt)

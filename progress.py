@@ -176,6 +176,19 @@ def get_all_passing_features(project_dir: Path) -> list[dict]:
         return []
 
 
+def _write_progress_cache(project_dir: Path, cache_file: Path, passing: int, passing_ids: list) -> None:
+    """Store the webhook progress cache, never through a link the agent planted."""
+    from api.safe_project_io import write_project_file
+    try:
+        write_project_file(
+            project_dir,
+            cache_file,
+            json.dumps({"count": passing, "passing_ids": passing_ids}).encode("utf-8"),
+        )
+    except OSError as e:
+        print(f"[Progress cache not written: {e}]")
+
+
 def send_progress_webhook(passing: int, total: int, project_dir: Path) -> None:
     """Send webhook notification when progress increases."""
     if not WEBHOOK_URL:
@@ -243,17 +256,13 @@ def send_progress_webhook(passing: int, total: int, project_dir: Path) -> None:
             print(f"[Webhook notification failed: {e}]")
 
         # Update cache with count and passing IDs
-        cache_file.write_text(
-            json.dumps({"count": passing, "passing_ids": current_passing_ids})
-        )
+        _write_progress_cache(project_dir, cache_file, passing, current_passing_ids)
     else:
         # Update cache even if no change (for initial state)
         if not cache_file.exists():
             all_passing = get_all_passing_features(project_dir)
             current_passing_ids = [f.get("id") for f in all_passing]
-            cache_file.write_text(
-                json.dumps({"count": passing, "passing_ids": current_passing_ids})
-            )
+            _write_progress_cache(project_dir, cache_file, passing, current_passing_ids)
 
 
 def clear_stuck_features(project_dir: Path) -> int:

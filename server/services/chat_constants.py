@@ -137,12 +137,14 @@ def write_system_prompt_file(project_dir: Path, session_kind: str, system_prompt
     Any CLAUDE.md that older versions generated from a chat prompt is removed
     first (see ``remove_legacy_claude_md()``).
     """
+    from api.safe_project_io import write_project_file
     from autoforge_paths import get_system_prompt_path
 
     remove_legacy_claude_md(project_dir)
-    path = get_system_prompt_path(project_dir, session_kind, uuid.uuid4().hex).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(system_prompt, encoding="utf-8")
+    project_dir = project_dir.resolve()
+    path = get_system_prompt_path(project_dir, session_kind, uuid.uuid4().hex)
+    # Never through a symlinked .autoforge/ the agent may have planted (raises when refused)
+    write_project_file(project_dir, path, system_prompt.encode("utf-8"))
     return path
 
 

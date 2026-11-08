@@ -14,9 +14,14 @@ file that is renamed over the target, so a symlink or hard link at the target
 name is replaced instead of written through.
 
 These helpers need ``dir_fd`` support (POSIX). ``DIR_FD_SUPPORTED`` is False on
-Windows; callers keep a path-based check there.
+Windows. The ``*_project_*`` helpers take a project directory plus a target path
+below it and fall back to a path-based check there (refuse when the target or any
+component below the project directory is a symlink); they raise ``OSError``
+(``UnsafeProjectPathError`` for a refused link) so callers keep the error
+handling they already have for a failed write.
 """
 
+import errno
 import os
 import stat
 import uuid
@@ -33,6 +38,44 @@ DIR_FD_SUPPORTED = (
 )
 
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+# What os.open reports for a symlink opened with O_NOFOLLOW (ELOOP on Linux;
+# ENOTDIR / EMLINK on some BSDs when O_DIRECTORY is set as well)
+_LINK_ERRNOS = frozenset({errno.ELOOP, errno.ENOTDIR, errno.EMLINK})
+
+
+class UnsafeProjectPathError(OSError):
+    """A project path was refused: it leaves the project or goes through a link."""
+
+
+def _walk_dirs(root: Path, parts: Sequence[str], create: bool) -> int:
+    """Open ``root/parts...`` without following symlinks below ``root``.
+
+    Raises:
+        UnsafeProjectPathError: a component is a symlink, not a directory or invalid
+        OSError: any other failure (e.g. a missing component when not creating)
+    """
+    fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        for name in parts:
+            if name in ("", ".", ".."):
+                raise UnsafeProjectPathError(f"invalid path component {name!r}")
+            if create:
+                try:
+                    os.mkdir(name, 0o755, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            try:
+                next_fd = os.open(name, _DIR_FLAGS, dir_fd=fd)
+            except OSError as e:
+                if e.errno in _LINK_ERRNOS:
+                    raise UnsafeProjectPathError(f"{name!r} is a symlink or not a directory") from e
+                raise
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def open_dir(root: Path, parts: Sequence[str], create: bool = False) -> int | None:
@@ -48,24 +91,8 @@ def open_dir(root: Path, parts: Sequence[str], create: bool = False) -> int | No
         component is missing (and not created), is a symlink or is not a directory.
     """
     try:
-        fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        return _walk_dirs(root, parts, create)
     except OSError:
-        return None
-    try:
-        for name in parts:
-            if name in ("", ".", ".."):
-                raise OSError(f"invalid path component {name!r}")
-            if create:
-                try:
-                    os.mkdir(name, 0o755, dir_fd=fd)
-                except FileExistsError:
-                    pass
-            next_fd = os.open(name, _DIR_FLAGS, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-        return fd
-    except OSError:
-        os.close(fd)
         return None
 
 
@@ -92,6 +119,22 @@ def open_regular_file(root: Path, relative: Path) -> int | None:
     return fd
 
 
+def _replace_file(dir_fd: int, name: str, data: bytes) -> None:
+    """Write ``data`` to a fresh temp file in ``dir_fd`` and rename it over ``name``."""
+    tmp_name = f".{name}.{uuid.uuid4().hex}.tmp"
+    try:
+        fd = os.open(tmp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dir_fd)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.rename(tmp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_name, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
+
+
 def write_file(root: Path, relative: Path, data: bytes) -> bool:
     """Atomically write ``data`` to a file below ``root``, creating parent directories.
 
@@ -101,21 +144,187 @@ def write_file(root: Path, relative: Path, data: bytes) -> bool:
         True when written, False when a parent component is a symlink or the
         write failed.
     """
-    dir_fd = open_dir(root, relative.parts[:-1], create=True)
-    if dir_fd is None:
-        return False
-    tmp_name = f".{relative.name}.{uuid.uuid4().hex}.tmp"
     try:
-        fd = os.open(tmp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dir_fd)
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.rename(tmp_name, relative.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        dir_fd = _walk_dirs(root, relative.parts[:-1], create=True)
+    except OSError:
+        return False
+    try:
+        _replace_file(dir_fd, relative.name, data)
         return True
     except OSError:
-        try:
-            os.unlink(tmp_name, dir_fd=dir_fd)
-        except OSError:
-            pass
         return False
     finally:
         os.close(dir_fd)
+
+
+# ---------------------------------------------------------------------------
+# Project-level helpers: a target path below a project directory, any platform
+# ---------------------------------------------------------------------------
+
+def _project_relative(project_dir: Path, target: Path) -> Path:
+    """Return ``target`` relative to ``project_dir`` (as given or resolved)."""
+    for base in (project_dir, project_dir.resolve()):
+        try:
+            relative = target.relative_to(base)
+        except ValueError:
+            continue
+        if relative.parts and ".." not in relative.parts:
+            return relative
+    raise UnsafeProjectPathError(f"{target} is not inside the project {project_dir}")
+
+
+def _refuse_symlinks(project_dir: Path, relative: Path) -> Path:
+    """Path-based check for platforms without dir_fd: no symlink below the project."""
+    current = project_dir
+    for name in relative.parts:
+        current = current / name
+        if current.is_symlink():
+            raise UnsafeProjectPathError(f"{current} is a symlink")
+    return current
+
+
+def _open_single_link_file(dir_fd: int, name: str, flags: int) -> int:
+    """Open ``name`` in ``dir_fd`` without following a symlink; refuse non-regular or hard-linked files."""
+    try:
+        fd = os.open(name, flags | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), 0o644, dir_fd=dir_fd)
+    except OSError as e:
+        if e.errno in _LINK_ERRNOS:
+            raise UnsafeProjectPathError(f"{name!r} is a symlink") from e
+        raise
+    st = os.fstat(fd)
+    # A second hard link means the same inode may also live outside the project
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+        os.close(fd)
+        raise UnsafeProjectPathError(f"{name!r} is not a regular file with a single link")
+    return fd
+
+
+def write_project_file(project_dir: Path, target: Path, data: bytes) -> None:
+    """Atomically write ``data`` to ``target`` (below ``project_dir``), creating parents.
+
+    A symlink or hard link at the target is replaced, never written through.
+
+    Raises:
+        UnsafeProjectPathError: the target is outside the project or a parent is a symlink
+        OSError: the write failed
+    """
+    relative = _project_relative(project_dir, target)
+    if DIR_FD_SUPPORTED:
+        dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=True)
+        try:
+            _replace_file(dir_fd, relative.name, data)
+        finally:
+            os.close(dir_fd)
+        return
+    path = _refuse_symlinks(project_dir, relative)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "xb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def append_project_file(project_dir: Path, target: Path, data: bytes) -> None:
+    """Append ``data`` to ``target`` (below ``project_dir``), creating it and its parents.
+
+    Raises:
+        UnsafeProjectPathError: outside the project, a symlinked component, or the
+            target is not a regular file with a single link
+        OSError: the write failed
+    """
+    relative = _project_relative(project_dir, target)
+    if DIR_FD_SUPPORTED:
+        dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=True)
+        try:
+            fd = _open_single_link_file(dir_fd, relative.name, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        finally:
+            os.close(dir_fd)
+        with os.fdopen(fd, "ab") as f:
+            f.write(data)
+        return
+    path = _refuse_symlinks(project_dir, relative)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "ab") as f:
+        f.write(data)
+
+
+def create_project_file_exclusive(project_dir: Path, target: Path, data: bytes) -> None:
+    """Create ``target`` (below ``project_dir``) with ``data``; fail if the name exists.
+
+    Raises:
+        FileExistsError: the target exists (a symlink at the target counts)
+        UnsafeProjectPathError: outside the project or a parent is a symlink
+        OSError: the write failed
+    """
+    relative = _project_relative(project_dir, target)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if DIR_FD_SUPPORTED:
+        dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=True)
+        try:
+            fd = os.open(relative.name, flags | os.O_NOFOLLOW, 0o644, dir_fd=dir_fd)
+        finally:
+            os.close(dir_fd)
+    else:
+        path = _refuse_symlinks(project_dir, relative)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, flags, 0o644)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+
+
+def make_project_dirs(project_dir: Path, target: Path) -> None:
+    """Create the directory ``target`` (below ``project_dir``) and its parents.
+
+    Raises:
+        UnsafeProjectPathError: outside the project or a component is a symlink
+        OSError: creating a directory failed
+    """
+    relative = _project_relative(project_dir, target)
+    if DIR_FD_SUPPORTED:
+        os.close(_walk_dirs(project_dir.resolve(), relative.parts, create=True))
+        return
+    _refuse_symlinks(project_dir, relative).mkdir(parents=True, exist_ok=True)
+
+
+def read_project_file(project_dir: Path, target: Path) -> bytes:
+    """Read ``target`` (below ``project_dir``) without following links.
+
+    For project files whose content is copied or rewritten elsewhere in the
+    project: a symlink or hard link would otherwise copy a file from outside it.
+
+    Raises:
+        UnsafeProjectPathError: outside the project, a symlinked component, or the
+            target is not a regular file with a single link
+        OSError: the target is missing or unreadable
+    """
+    relative = _project_relative(project_dir, target)
+    if DIR_FD_SUPPORTED:
+        dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=False)
+        try:
+            fd = _open_single_link_file(dir_fd, relative.name, os.O_RDONLY)
+        finally:
+            os.close(dir_fd)
+        with os.fdopen(fd, "rb") as f:
+            return f.read()
+    return _refuse_symlinks(project_dir, relative).read_bytes()
+
+
+def copy_tree_into_project(project_dir: Path, source_dir: Path, target: Path) -> None:
+    """Copy the trusted directory ``source_dir`` (outside the project) to ``target``.
+
+    Files are written with ``write_project_file``, so a link planted anywhere on
+    the destination side is never written through.
+
+    Raises:
+        OSError: as ``write_project_file`` / ``make_project_dirs``
+    """
+    for dirpath, dirnames, filenames in os.walk(source_dir):
+        dirnames.sort()
+        destination = target / Path(dirpath).relative_to(source_dir)
+        make_project_dirs(project_dir, destination)
+        for name in sorted(filenames):
+            write_project_file(project_dir, destination / name, (Path(dirpath) / name).read_bytes())
