@@ -211,12 +211,63 @@ def test_agent_lock_not_created_in_symlinked_dir(project: Path, outside: Path) -
     manager.lock_file = project / ".autoforge" / ".agent.lock"
     manager.process = subprocess.Popen(["sleep", "5"])
     try:
-        assert manager._create_lock() is False
+        with pytest.raises(sio.UnsafeProjectPathError):  # its own reason, not "already running"
+            manager._create_lock()
     finally:
         manager.process.kill()
         manager.process.wait()
     assert _outside_names(outside) == set()
     assert os.path.lexists(manager.lock_file) is False
+
+
+def test_agent_start_reports_refused_lock_instead_of_another_instance(
+    project: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    from server.services import process_manager
+
+    class _FakeProcess:
+        pid = os.getpid()  # psutil needs a live pid for the lock content
+        terminated = False
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.args = args[0] if args else kwargs.get("args")
+
+        # subprocess.run (the "playwright-cli kill-all" cleanup) uses Popen as a context manager
+        def __enter__(self) -> "_FakeProcess":
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            return None
+
+        def communicate(self, *args: Any, **kwargs: Any) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def poll(self) -> int:
+            return 0
+
+        def terminate(self) -> None:
+            _FakeProcess.terminated = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+        def kill(self) -> None:
+            pass
+
+    _link_autoforge_outside(project, outside)
+    monkeypatch.setattr(process_manager.subprocess, "Popen", _FakeProcess)
+    monkeypatch.setattr("registry.get_effective_sdk_env", lambda: {})
+    monkeypatch.setattr("registry.get_testing_model_setting", lambda: None)
+    manager = _process_manager(project)
+
+    ok, message = asyncio.run(manager.start(yolo_mode=True))
+
+    assert ok is False and _FakeProcess.terminated
+    assert "Another agent instance" not in message
+    assert message.startswith("Cannot create the agent lock file") and "symlink" in message
+    assert _outside_names(outside) == set()
 
 
 def test_graceful_pause_refuses_symlinked_autoforge_dir(project: Path, outside: Path) -> None:

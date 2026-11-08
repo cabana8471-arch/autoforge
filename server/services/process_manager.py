@@ -21,7 +21,7 @@ import psutil
 
 # Add parent directory to path for shared module imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from api.safe_project_io import unlink_project_file  # noqa: E402
+from api.safe_project_io import UnsafeProjectPathError, unlink_project_file  # noqa: E402
 from auth import AUTH_ERROR_HELP_SERVER as AUTH_ERROR_HELP  # noqa: E402
 from auth import is_auth_error
 from server.utils.process_utils import kill_process_tree
@@ -201,6 +201,9 @@ class AgentProcessManager:
 
         Returns:
             True if lock was created successfully, False if lock already exists.
+
+        Raises:
+            UnsafeProjectPathError: the lock's directory is a link the agent planted
         """
         if not self.process:
             return False
@@ -218,6 +221,8 @@ class AgentProcessManager:
         except FileExistsError:
             # Another process beat us to it
             return False
+        except UnsafeProjectPathError:
+            raise  # not "another agent is running": the caller reports the real reason
         except (psutil.NoSuchProcess, OSError) as e:
             logger.warning(f"Failed to create lock file: {e}")
             return False
@@ -512,7 +517,13 @@ class AgentProcessManager:
             self.process = subprocess.Popen(cmd, **popen_kwargs)
 
             # Atomic lock creation - if it fails, another process beat us
-            if not self._create_lock():
+            # (or the lock path was refused because of a planted link)
+            refusal = None
+            try:
+                locked = self._create_lock()
+            except UnsafeProjectPathError as e:
+                locked, refusal = False, f"Cannot create the agent lock file: {e}"
+            if not locked:
                 # Kill the process we just started since we couldn't get the lock
                 self.process.terminate()
                 try:
@@ -520,7 +531,7 @@ class AgentProcessManager:
                 except subprocess.TimeoutExpired:
                     self.process.kill()
                 self.process = None
-                return False, "Another agent instance is already running for this project"
+                return False, refusal or "Another agent instance is already running for this project"
 
             self.started_at = datetime.now()
             self.status = "running"
