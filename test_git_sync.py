@@ -221,6 +221,19 @@ def test_remote_named_like_a_url_blocks_the_push(enabled: Path, remote: Path):
     assert _branches(remote) == ""
 
 
+@pytest.mark.parametrize("folder", ["remotes", "branches"])
+def test_legacy_remote_files_block_the_push(enabled: Path, remote: Path, folder: str):
+    """.git/remotes/ and .git/branches/ files define remotes by name outside the config."""
+    legacy = enabled / ".git" / folder
+    legacy.mkdir(exist_ok=True)
+    (legacy / "x").write_text("URL: /elsewhere.git\n")
+    _commit(enabled, "x.txt")
+    ok, msg = git_sync.push_current_branch(enabled)
+    assert not ok
+    assert folder in msg
+    assert _branches(remote) == ""
+
+
 def test_unreadable_config_refuses_the_push(enabled: Path, remote: Path, monkeypatch):
     """Fail closed: if the config cannot be listed, nothing is known to be safe."""
     real_git = git_sync._git

@@ -29,7 +29,7 @@ class GitPushStatus(BaseModel):
     remote: str | None = None
     url: str | None = None  # Stored (trusted) URL that pushes go to
     current_url: str | None = None  # What `git remote get-url <remote>` says now
-    unsafe_config: list[str] = Field(default_factory=list)  # Local keys that block the push
+    unsafe_config: list[str] = Field(default_factory=list)  # Repo config keys / legacy remote files that block it
 
 
 class GitPushUpdate(BaseModel):
@@ -62,7 +62,7 @@ def _status(project_dir: Path) -> GitPushStatus:
         remote=remote,
         url=target["url"] if target else None,
         current_url=git_sync.get_remote_url(project_dir, remote),
-        unsafe_config=git_sync.find_unsafe_local_config(project_dir),
+        unsafe_config=[*git_sync.find_unsafe_local_config(project_dir), *git_sync.find_legacy_remote_files(project_dir)],
     )
 
 

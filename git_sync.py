@@ -19,7 +19,9 @@ agent may run any ``git`` command in the project. So a push is refused when:
   (``url.*`` insteadOf rewrites apply even to an explicit URL,
   ``core.sshCommand``, ``credential.*``, ``remote.*.receivepack``,
   ``include.*`` hiding keys in another file, ...), so an allowlist is used
-  rather than a list of known-bad keys.
+  rather than a list of known-bad keys;
+- ``.git/remotes/`` or ``.git/branches/`` holds a file (old-style remote
+  definitions, read by name outside the config).
 Hooks never run (``core.hooksPath=/dev/null`` and ``--no-verify``), it never
 force-pushes, never creates remotes, and runs non-interactively with a timeout.
 """
@@ -146,12 +148,43 @@ def _is_safe_repo_key(key: str) -> bool:
     return f"{section}.{variable}" in SAFE_REPO_CONFIG_KEYS
 
 
+def _legacy_remotes_message(entries: list[str]) -> str:
+    return (
+        f"refusing: {', '.join(entries)} define remotes outside the git config and could redirect the push; "
+        "remove them (use `git remote` instead)"
+    )
+
+
 def _unsafe_config_message(keys: list[str]) -> str:
     return (
         f"refusing: the project's git config sets {', '.join(keys)}; auto-push only runs with plain "
         "repository, identity, branch and remote url/fetch settings, because other keys can redirect "
         "the push or run a program. Remove them (or move them to your global git config)"
     )
+
+
+def find_legacy_remote_files(project_dir: Path) -> list[str]:
+    """Entries in .git/remotes/ and .git/branches/: old-style remote definitions outside the config.
+
+    A file there can define a remote by name (URL and push refspecs), so it is
+    refused like an unknown config key. ``git init`` leaves both empty.
+    """
+    result = _git(project_dir, "rev-parse", "--git-path", "remotes", "--git-path", "branches")
+    if result.returncode != 0:
+        return ["<could not locate .git/remotes and .git/branches>"]
+    found: list[str] = []
+    for line in result.stdout.splitlines():
+        folder = Path(line.strip())
+        if not folder.is_absolute():
+            folder = project_dir / folder
+        try:
+            names = sorted(os.listdir(folder))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            names = ["<unreadable>"]
+        found.extend(f"{line.strip()}/{name}" for name in names)
+    return found
 
 
 def get_remote_url(project_dir: Path, remote: str) -> str | None:
@@ -173,6 +206,9 @@ def enable_auto_push(project_dir: Path, remote: str = "origin") -> dict:
     unsafe = find_unsafe_local_config(project_dir)
     if unsafe:
         raise GitPushError(_unsafe_config_message(unsafe))
+    legacy = find_legacy_remote_files(project_dir)
+    if legacy:
+        raise GitPushError(_legacy_remotes_message(legacy))
     url = get_remote_url(project_dir, remote)
     if url is None:
         raise GitPushError(f"The project has no remote '{remote}' (add it with `git remote add {remote} <url>`)")
@@ -214,6 +250,9 @@ def push_current_branch(project_dir: Path) -> tuple[bool, str]:
             unsafe = find_unsafe_local_config(project_dir)
             if unsafe:
                 return False, _unsafe_config_message(unsafe)
+            legacy = find_legacy_remote_files(project_dir)
+            if legacy:
+                return False, _legacy_remotes_message(legacy)
 
             current = get_remote_url(project_dir, target["remote"])
             if current != target["url"]:
