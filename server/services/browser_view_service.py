@@ -15,12 +15,13 @@ import base64
 import logging
 import shutil
 import threading
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from api.safe_project_io import read_project_file, unlink_project_file
+from api.safe_project_io import make_project_dirs, read_project_file, unlink_project_file
 
 logger = logging.getLogger(__name__)
 
@@ -191,9 +192,12 @@ class BrowserViewService:
             if session.consecutive_failures % int(BACKOFF_INTERVAL / POLL_INTERVAL) != 0:
                 return
 
+        # The file is written by the agent's (sandboxed) playwright-cli daemon, so it
+        # must live in the project; a fresh unpredictable name per capture means a
+        # link cannot be planted there in advance, and it is read without following links.
         screenshot_dir = self.project_dir / ".playwright-cli"
-        screenshot_dir.mkdir(parents=True, exist_ok=True)
-        screenshot_path = screenshot_dir / f"_view_{session.session_name}.png"
+        make_project_dirs(self.project_dir, screenshot_dir)
+        screenshot_path = screenshot_dir / f"_view_{session.session_name}_{uuid.uuid4().hex}.png"
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -258,12 +262,26 @@ class BrowserViewService:
                 pass
 
     def _cleanup_screenshot_file(self, session_name: str) -> None:
-        """Remove a session's screenshot file."""
-        try:
-            path = self.project_dir / ".playwright-cli" / f"_view_{session_name}.png"
-            unlink_project_file(self.project_dir, path, missing_ok=True)
-        except Exception:
-            pass
+        """Remove a session's leftover screenshot files (e.g. after a crash mid-capture)."""
+        screenshot_dir = self.project_dir / ".playwright-cli"
+        for name in (f"_view_{session_name}.png", *(p.name for p in _list_dir(screenshot_dir))):
+            if name == f"_view_{session_name}.png" or (
+                name.startswith(f"_view_{session_name}_") and name.endswith(".png")
+            ):
+                try:
+                    unlink_project_file(self.project_dir, screenshot_dir / name, missing_ok=True)
+                except Exception:
+                    pass
+
+
+def _list_dir(directory: Path) -> list[Path]:
+    """Entries of ``directory``; empty when it is missing or a symlink (never listed through)."""
+    try:
+        if directory.is_symlink():
+            return []
+        return list(directory.iterdir())
+    except OSError:
+        return []
 
 
 # ---------------------------------------------------------------------------

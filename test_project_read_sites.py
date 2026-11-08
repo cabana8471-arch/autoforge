@@ -12,6 +12,7 @@ Run with: python -m pytest test_project_read_sites.py
 """
 
 import asyncio
+import base64
 import json
 import os
 from pathlib import Path
@@ -375,3 +376,78 @@ def test_generated_docs_skip_linked_env_file(project: Path, secret: Path) -> Non
     _plant(project / ".env.example", secret)
 
     assert _no_secret(DocumentationGenerator(project).generate().environment_vars)
+
+
+def _fake_playwright_cli(tmp_path: Path, mode: str, secret: Path | None = None) -> str:
+    """A playwright-cli stand-in that writes (or links) the file named by --filename, like the daemon."""
+    script = tmp_path / f"fake_cli_{mode}.py"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        "path = next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--filename='))\n"
+        f"if {mode!r} == 'link':\n"
+        f"    os.link({str(secret)!r}, path)\n"
+        "else:\n"
+        "    open(path, 'wb').write(b'PNGDATA')\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_browser_view_captures_into_a_fresh_name_and_removes_it(project: Path, tmp_path: Path) -> None:
+    """The (sandboxed) daemon writes into .playwright-cli/; each capture uses a new unpredictable name."""
+    from server.services.browser_view_service import BrowserViewService, SessionInfo
+
+    service = BrowserViewService("demo", project)
+    sent: list[Any] = []
+
+    async def collect(screenshot: Any) -> None:
+        sent.append(screenshot)
+
+    service._screenshot_callbacks.add(collect)
+    names: list[str] = []
+    cli = _fake_playwright_cli(tmp_path, "write")
+    real_exec = asyncio.create_subprocess_exec
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        names.extend(a for a in args if str(a).startswith("--filename="))
+        return await real_exec(*args, **kwargs)
+
+    service._get_playwright_cli = lambda: cli  # type: ignore[method-assign]
+    session = SessionInfo(session_name="s1", agent_index=0, agent_type="coding", feature_id=1, feature_name="f")
+    import server.services.browser_view_service as bvs
+
+    original = bvs.asyncio.create_subprocess_exec
+    bvs.asyncio.create_subprocess_exec = spy
+    try:
+        asyncio.run(service._capture_and_deliver(session))
+        asyncio.run(service._capture_and_deliver(session))
+    finally:
+        bvs.asyncio.create_subprocess_exec = original
+
+    assert len(sent) == 2 and base64.b64decode(sent[0].image_base64) == b"PNGDATA"
+    assert len(set(names)) == 2 and all(".playwright-cli" in n for n in names)
+    assert list((project / ".playwright-cli").iterdir()) == []  # removed after delivery
+
+
+def test_browser_view_does_not_send_a_screenshot_linked_at_capture_time(
+    project: Path, secret: Path, tmp_path: Path
+) -> None:
+    from server.services.browser_view_service import BrowserViewService, SessionInfo
+
+    service = BrowserViewService("demo", project)
+    sent: list[Any] = []
+
+    async def collect(screenshot: Any) -> None:
+        sent.append(screenshot)
+
+    service._screenshot_callbacks.add(collect)
+    cli = _fake_playwright_cli(tmp_path, "link", secret)
+    service._get_playwright_cli = lambda: cli  # type: ignore[method-assign]
+    session = SessionInfo(session_name="s1", agent_index=0, agent_type="coding", feature_id=1, feature_name="f")
+
+    asyncio.run(service._capture_and_deliver(session))
+
+    assert sent == [] and session.consecutive_failures == 1
+    assert secret.exists()
