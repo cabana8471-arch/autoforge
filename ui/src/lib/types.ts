@@ -710,6 +710,9 @@ export interface GitHubIssue {
   url: string
   labels: string[]
   author: string
+  author_association: string
+  // OWNER/MEMBER/COLLABORATOR; others need an explicit confirmation to import
+  author_trusted: boolean
   comments: number
   created_at: string | null
   updated_at: string | null

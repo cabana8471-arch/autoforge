@@ -153,7 +153,7 @@ python -m pytest test_usage_tracker.py        # Token/cost tracking tests
 python -m pytest test_billing_utils.py        # Spend safeguards: billing stop, run cap from usage records, cost of an aborted session
 python -m pytest test_spend_stop_status.py    # Exit codes 3/4 are "stopped" with a reason, never "crashed" (no scheduler restart)
 python -m pytest test_project_skills.py       # Project skills: library (no ~/.claude/skills), install/remove, planted links, Skill tool
-python -m pytest test_github_issues.py        # GitHub issue import: parsing, endpoints, comments excluded by default
+python -m pytest test_github_issues.py        # GitHub issue import: parsing, endpoints, comments excluded by default, external authors need confirmation
 python -m pytest test_roadmap.py              # Backlog + maturity tags: ready checks, promote/backlog endpoints, scheduling order
 python -m pytest test_backlog_scheduling.py   # Backlog stays out of progress totals, stall reasons and completion message
 python -m pytest test_git_sync.py             # Git auto-push: stored URL only, repo config allowlist (local + worktree), changed remote refused, hooks never run

@@ -39,6 +39,8 @@ export function GitHubImportModal({ projectName, onClose }: GitHubImportModalPro
   const [issues, setIssues] = useState<GitHubIssue[]>([])
   const [authenticated, setAuthenticated] = useState<boolean | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  // Issue whose external author the user is being asked to confirm
+  const [confirming, setConfirming] = useState<number | null>(null)
   const [filter, setFilter] = useState('')
   // Off by default: anyone who can comment on an issue could steer the agent
   const [includeComments, setIncludeComments] = useState(false)
@@ -59,6 +61,7 @@ export function GitHubImportModal({ projectName, onClose }: GitHubImportModalPro
       setIssues(data.issues)
       setAuthenticated(data.authenticated)
       setSelected(new Set())
+      setConfirming(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load issues')
       setIssues([])
@@ -95,10 +98,16 @@ export function GitHubImportModal({ projectName, onClose }: GitHubImportModalPro
     )
   }, [issues, filter])
 
-  const selectable = visibleIssues.filter(i => i.imported_feature_id === null)
+  // "Select all" only takes issues by people with write access; the others need a confirmation each
+  const selectable = visibleIssues.filter(i => i.imported_feature_id === null && i.author_trusted)
   const allSelected = selectable.length > 0 && selectable.every(i => selected.has(i.number))
 
-  const toggle = (num: number) => {
+  const toggle = (issue: GitHubIssue) => {
+    const num = issue.number
+    if (!issue.author_trusted && !selected.has(num)) {
+      setConfirming(num)
+      return
+    }
     setSelected(prev => {
       const next = new Set(prev)
       if (next.has(num)) next.delete(num)
@@ -123,7 +132,9 @@ export function GitHubImportModal({ projectName, onClose }: GitHubImportModalPro
     setResult(null)
     try {
       const numbers = [...selected].slice(0, 50)
-      const res = await importGitHubIssues(projectName, loadedRepo, numbers, includeComments)
+      // Untrusted issues only enter the selection through the confirmation prompt
+      const external = issues.filter(i => !i.author_trusted && numbers.includes(i.number)).map(i => i.number)
+      const res = await importGitHubIssues(projectName, loadedRepo, numbers, includeComments, external)
       queryClient.invalidateQueries({ queryKey: ['features', projectName] })
       const imported = new Map(res.features.map(f => [Number(f.name.match(/^#(\d+)/)?.[1]), f.id]))
       setIssues(prev => prev.map(i => imported.has(i.number) ? { ...i, imported_feature_id: imported.get(i.number)! } : i))
@@ -246,7 +257,7 @@ export function GitHubImportModal({ projectName, onClose }: GitHubImportModalPro
                         id={checkboxId}
                         checked={selected.has(issue.number)}
                         disabled={imported}
-                        onCheckedChange={() => toggle(issue.number)}
+                        onCheckedChange={() => toggle(issue)}
                         className="mt-1"
                       />
                       <div className="flex-1 min-w-0">
@@ -257,8 +268,38 @@ export function GitHubImportModal({ projectName, onClose }: GitHubImportModalPro
                         <div className="flex flex-wrap items-center gap-1 mt-1">
                           {issue.state === 'closed' && <Badge variant="outline">closed</Badge>}
                           {imported && <Badge variant="secondary">already imported</Badge>}
+                          {!issue.author_trusted && (
+                            <Badge variant="destructive" title={`author_association: ${issue.author_association}`}>
+                              external author{issue.author ? `: @${issue.author}` : ''}
+                            </Badge>
+                          )}
                           {issue.labels.map(l => <Badge key={l} variant="outline">{l}</Badge>)}
                         </div>
+                        {confirming === issue.number && (
+                          <div className="mt-2 rounded-md border border-destructive/50 p-2 text-sm space-y-2">
+                            <p>
+                              {issue.author ? `@${issue.author}` : 'The author'} has no write access to this
+                              repository. Anyone can open an issue, and its text becomes instructions for the
+                              coding agent. Select it only if you have read it and trust it.
+                            </p>
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => {
+                                  setSelected(prev => new Set(prev).add(issue.number))
+                                  setConfirming(null)
+                                }}
+                              >
+                                Select anyway
+                              </Button>
+                              <Button type="button" size="sm" variant="outline" onClick={() => setConfirming(null)}>
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <a
                         href={issue.url}

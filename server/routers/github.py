@@ -32,6 +32,8 @@ class GitHubIssueItem(BaseModel):
     url: str
     labels: list[str]
     author: str
+    author_association: str = "NONE"
+    author_trusted: bool = False
     comments: int
     created_at: str | None = None
     updated_at: str | None = None
@@ -55,6 +57,9 @@ class GitHubImportRequest(BaseModel):
     # Off by default (user decision 3A): anyone who can comment on an issue could add
     # text that becomes instructions for the coding agent
     include_comments: bool = False
+    # Issues by authors without write access to the repository (user decision 2A):
+    # their numbers must be listed here, or the import is refused
+    confirm_external_authors: list[int] = Field(default_factory=list, max_length=50)
 
 
 class GitHubImportResponse(BaseModel):
@@ -154,6 +159,19 @@ async def import_issues(project_name: str, request: GitHubImportRequest):
             issues.append((issue, comments))
     except gh.GitHubError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
+
+    # Checked on the freshly fetched issue, not on what the UI listed earlier
+    unconfirmed = [
+        issue["number"]
+        for issue, _ in issues
+        if not issue["author_trusted"] and issue["number"] not in request.confirm_external_authors
+    ]
+    if unconfirmed:
+        listed = ", ".join(f"#{n}" for n in unconfirmed)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Issues written by people without write access to the repository need confirmation: {listed}",
+        )
 
     already = _imported_issue_map(project_dir, [i for i, _ in issues])
     _, Feature = _get_db_classes()

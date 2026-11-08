@@ -330,11 +330,17 @@ export async function importGitHubIssues(
   projectName: string,
   repo: string,
   issueNumbers: number[],
-  includeComments = false
+  includeComments = false,
+  confirmExternalAuthors: number[] = []
 ): Promise<GitHubImportResponse> {
   return fetchJSON(`/projects/${encodeURIComponent(projectName)}/github/import`, {
     method: 'POST',
-    body: JSON.stringify({ repo, issue_numbers: issueNumbers, include_comments: includeComments }),
+    body: JSON.stringify({
+      repo,
+      issue_numbers: issueNumbers,
+      include_comments: includeComments,
+      confirm_external_authors: confirmExternalAuthors,
+    }),
   })
 }
 

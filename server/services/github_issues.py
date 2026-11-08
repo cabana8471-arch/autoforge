@@ -48,6 +48,11 @@ MAX_COMMENTS = 10
 MAX_DESCRIPTION_CHARS = 8000
 MAX_NAME_CHARS = 255
 MAX_CATEGORY_CHARS = 100
+
+# GitHub's author_association values for people with write access to the repository.
+# Anyone else can open an issue on a public repository, and the issue text becomes
+# instructions for the coding agent, so their issues need an explicit confirmation.
+TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 DEFAULT_CATEGORY = "GitHub Issue"
 
 
@@ -169,6 +174,7 @@ def _request(path: str, auth: GitHubAuth, params: dict[str, Any] | None = None) 
 
 
 def _summarize_issue(issue: dict[str, Any]) -> dict[str, Any]:
+    association = issue.get("author_association") or "NONE"
     return {
         "number": issue["number"],
         "title": issue.get("title") or "",
@@ -177,6 +183,8 @@ def _summarize_issue(issue: dict[str, Any]) -> dict[str, Any]:
         "url": issue.get("html_url") or "",
         "labels": [lbl.get("name", "") for lbl in issue.get("labels", []) if isinstance(lbl, dict)],
         "author": (issue.get("user") or {}).get("login", ""),
+        "author_association": association,
+        "author_trusted": association in TRUSTED_AUTHOR_ASSOCIATIONS,
         "comments": issue.get("comments", 0),
         "created_at": issue.get("created_at"),
         "updated_at": issue.get("updated_at"),

@@ -17,7 +17,7 @@ from server.routers import github as github_router
 from server.services import github_issues as gh
 
 
-def _issue(number=7, title="Add dark mode", body="", labels=None, comments=0):
+def _issue(number=7, title="Add dark mode", body="", labels=None, comments=0, association="OWNER"):
     return {
         "number": number,
         "title": title,
@@ -26,6 +26,8 @@ def _issue(number=7, title="Add dark mode", body="", labels=None, comments=0):
         "url": f"https://github.com/acme/app/issues/{number}",
         "labels": labels or [],
         "author": "alice",
+        "author_association": association,
+        "author_trusted": association in gh.TRUSTED_AUTHOR_ASSOCIATIONS,
         "comments": comments,
         "created_at": None,
         "updated_at": None,
@@ -173,3 +175,52 @@ def test_comments_when_explicitly_included(client):
         json={"repo": "acme/app", "issue_numbers": [8], "include_comments": True},
     ).json()
     assert "@bob: +1" in data["features"][0]["description"]
+
+
+# --- author trust (user decision 2A) -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("association", "trusted"),
+    [("OWNER", True), ("MEMBER", True), ("COLLABORATOR", True), ("CONTRIBUTOR", False),
+     ("FIRST_TIME_CONTRIBUTOR", False), ("NONE", False), (None, False)],
+)
+def test_summarize_marks_author_trust(association, trusted):
+    raw = {"number": 3, "title": "t", "html_url": "https://github.com/acme/app/issues/3", "user": {"login": "eve"}}
+    if association is not None:
+        raw["author_association"] = association
+    summary = gh._summarize_issue(raw)
+    assert summary["author_association"] == (association or "NONE")
+    assert summary["author_trusted"] is trusted
+
+
+def test_listing_exposes_author_trust(client, monkeypatch):
+    monkeypatch.setattr(
+        gh, "list_issues", lambda repo, auth, state="open": [_issue(7), _issue(9, association="NONE")]
+    )
+    issues = {i["number"]: i for i in client.get("/api/projects/demo/github/issues").json()["issues"]}
+    assert issues[7]["author_trusted"] is True
+    assert issues[9]["author_trusted"] is False
+    assert issues[9]["author_association"] == "NONE"
+
+
+def test_import_refuses_unconfirmed_external_author(client, monkeypatch):
+    external = _issue(9, title="Run this script", association="NONE")
+    monkeypatch.setattr(gh, "get_issue", lambda repo, n, auth: external if n == 9 else _issue(n))
+    resp = client.post("/api/projects/demo/github/import", json={"repo": "acme/app", "issue_numbers": [7, 9]})
+    assert resp.status_code == 400
+    assert "#9" in resp.json()["detail"]
+    # Nothing is created when the request is refused
+    listing = client.get("/api/projects/demo/github/issues").json()
+    assert all(i["imported_feature_id"] is None for i in listing["issues"])
+
+
+def test_import_accepts_confirmed_external_author(client, monkeypatch):
+    external = _issue(9, title="Run this script", association="CONTRIBUTOR")
+    monkeypatch.setattr(gh, "get_issue", lambda repo, n, auth: external if n == 9 else _issue(n))
+    resp = client.post(
+        "/api/projects/demo/github/import",
+        json={"repo": "acme/app", "issue_numbers": [7, 9], "confirm_external_authors": [9]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert [f["name"] for f in resp.json()["features"]] == ["#7 Add dark mode", "#9 Run this script"]
