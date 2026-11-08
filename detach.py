@@ -612,8 +612,24 @@ def restore_backup(project_dir: Path, verify_checksums: bool = False) -> tuple[b
         return False, files_restored, conflicts
 
 
-def update_gitignore(project_dir: Path) -> None:
-    """Add backup directories to .gitignore if not already present."""
+def update_gitignore(project_dir: Path) -> str | None:
+    """Add backup directories to .gitignore if not already present.
+
+    Returns:
+        None when done, or the reason it could not be updated (logged as a
+        warning). It runs after the files were moved to the backup, so a
+        refused .gitignore (e.g. a symlink planted in the project) must not
+        fail the detach.
+    """
+    try:
+        _add_backup_dirs_to_gitignore(project_dir)
+        return None
+    except OSError as e:
+        logger.warning("Could not update .gitignore: %s", e)
+        return str(e)
+
+
+def _add_backup_dirs_to_gitignore(project_dir: Path) -> None:
     gitignore_path = project_dir / ".gitignore"
 
     patterns = [
@@ -865,9 +881,11 @@ def detach_project(
         # Create backup
         manifest = create_backup(project_dir, project_name, files, dry_run)
 
-        # Update .gitignore
+        # Update .gitignore (a failure is reported in the message, not raised:
+        # the files are already in the backup)
+        gitignore_error = None
         if not dry_run:
-            update_gitignore(project_dir)
+            gitignore_error = update_gitignore(project_dir)
 
         # Restore user files from pre-reattach backup if exists
         user_files_restored = 0
@@ -878,6 +896,8 @@ def detach_project(
         message = f"{action} {manifest['file_count']} files ({manifest['total_size_bytes'] / 1024 / 1024:.1f} MB) to backup"
         if user_files_restored > 0:
             message += f", restored {user_files_restored} user files"
+        if gitignore_error:
+            message += f"; warning: {BACKUP_DIR}/ was not added to .gitignore ({gitignore_error})"
 
         return True, message, manifest, user_files_restored
 
