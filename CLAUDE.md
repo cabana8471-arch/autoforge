@@ -133,6 +133,7 @@ python -m pytest test_spec_readers_path.py    # Spec readers resolve .autoforge/
 python -m pytest test_manual_testing.py       # Manual Testing lane: state, blocking, verdict endpoint, MCP tool
 python -m pytest test_feature_update.py        # Editing features, incl. reopening completed ones
 python -m pytest test_testing_model.py         # Separate model for testing agents (CLI, settings, UI start)
+python -m pytest test_feature_report_bug.py    # Assistant bug reports reopen the existing feature
 ```
 
 ### React UI
@@ -256,6 +257,7 @@ MCP tools available to the agent:
 - `feature_clear_in_progress` - Clear in-progress status
 - `feature_create_bulk` - Initialize all features (used by initializer)
 - `feature_create` - Create a single feature
+- `feature_report_bug` - Report a bug on an existing feature and move it back to pending (used by the assistant)
 - `feature_add_dependency` - Add dependency between features (with cycle detection)
 - `feature_remove_dependency` - Remove a dependency
 - `feature_set_dependencies` - Set all dependencies for a feature at once
