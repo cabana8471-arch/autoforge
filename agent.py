@@ -51,6 +51,7 @@ from prompts import (
     get_single_feature_prompt,
     get_testing_prompt,
     with_file_editing_rules,
+    with_project_knowledge,
 )
 from rate_limit_utils import (
     calculate_error_backoff,
@@ -543,6 +544,8 @@ async def run_autonomous_agent(
             prompt = get_coding_prompt(project_dir, yolo_mode=yolo_mode)
 
         prompt = with_file_editing_rules(prompt)
+        # Point the agent at any user-uploaded knowledge documents
+        prompt = with_project_knowledge(prompt, project_dir)
 
         # Run session with async context manager
         # Wrap in try/except to handle MCP server startup failures gracefully

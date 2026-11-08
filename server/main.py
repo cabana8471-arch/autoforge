@@ -54,6 +54,7 @@ from .routers import (
     filesystem_router,
     git_workflow_router,
     import_project_router,
+    knowledge_router,
     logs_router,
     projects_router,
     review_router,
@@ -223,6 +224,7 @@ app.include_router(review_router)
 app.include_router(documentation_router)
 app.include_router(design_tokens_router)
 app.include_router(visual_regression_router)
+app.include_router(knowledge_router)
 
 
 # ============================================================================

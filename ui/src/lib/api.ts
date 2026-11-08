@@ -37,6 +37,9 @@ import type {
   DetachResponse,
   ReattachResponse,
   DetachStatusResponse,
+  KnowledgeFileInfo,
+  KnowledgeListResponse,
+  KnowledgeFileContent,
 } from './types'
 
 const API_BASE = '/api'
@@ -628,4 +631,36 @@ export async function deleteSchedule(
 
 export async function getNextScheduledRun(projectName: string): Promise<NextRunResponse> {
   return fetchJSON(`/projects/${encodeURIComponent(projectName)}/schedules/next`)
+}
+
+// ============================================================================
+// Project Knowledge API
+// ============================================================================
+
+export async function listKnowledgeFiles(projectName: string): Promise<KnowledgeListResponse> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/knowledge`)
+}
+
+export async function getKnowledgeFile(projectName: string, filename: string): Promise<KnowledgeFileContent> {
+  return fetchJSON(
+    `/projects/${encodeURIComponent(projectName)}/knowledge/${encodeURIComponent(filename)}`
+  )
+}
+
+export async function uploadKnowledgeFile(
+  projectName: string,
+  filename: string,
+  content: string
+): Promise<KnowledgeFileInfo> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/knowledge`, {
+    method: 'POST',
+    body: JSON.stringify({ filename, content }),
+  })
+}
+
+export async function deleteKnowledgeFile(projectName: string, filename: string): Promise<void> {
+  await fetchJSON(
+    `/projects/${encodeURIComponent(projectName)}/knowledge/${encodeURIComponent(filename)}`,
+    { method: 'DELETE' }
+  )
 }

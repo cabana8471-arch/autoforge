@@ -227,6 +227,15 @@ def get_validation_dir(project_dir: Path) -> Path:
     return project_dir / ".autoforge" / "validation"
 
 
+def get_knowledge_dir(project_dir: Path) -> Path:
+    """Return the ``.autoforge/knowledge/`` directory.  Does NOT create it.
+
+    Holds user-supplied reference documents (requirements, research notes)
+    that every agent session is pointed at.
+    """
+    return project_dir / ".autoforge" / "knowledge"
+
+
 def get_expand_settings_path(project_dir: Path, uuid_hex: str) -> Path:
     """Return the path for an ephemeral expand-session settings file.
 

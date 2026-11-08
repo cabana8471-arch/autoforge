@@ -146,6 +146,7 @@ python -m pytest test_onboard_project.py       # Onboarding: spec-only write hoo
 python -m pytest test_chat_ws_keepalive.py     # Chat WebSockets: long turns survive pings, network drop finishes the turn, closing the chat cancels it
 python -m pytest test_allowlist_protection.py     # The agent cannot edit the project allowlist (settings deny, sandbox denyWrite, Bash hook)
 python -m pytest test_feature_db_protection.py    # features.db (+ -wal/-shm/-journal, legacy locations) read-only for agent Bash and file tools; MCP server unaffected
+python -m pytest test_knowledge.py             # Knowledge documents: prompt pointer, REST API, planted links never followed
 python -m pytest test_api_providers.py        # API provider env tests (GLM, Gemini, Kimi Code, Moonshot)
 python -m pytest test_settings_provider_switch.py  # Provider switch resets base URL and clears the previous key
 python -m pytest test_usage_tracker.py        # Token/cost tracking tests
@@ -238,6 +239,7 @@ The FastAPI server provides REST and WebSocket endpoints for the UI:
 - `devserver.py` - Dev server control (start/stop) and config
 - `schedules.py` - CRUD for time-based agent scheduling
 - `settings.py` - Global settings management (model selection, YOLO, batch size, headless browser)
+- `knowledge.py` - Upload/list/read/delete project knowledge documents (`.autoforge/knowledge/*.md`)
 
 **Services** (`server/services/`):
 - `process_manager.py` - Agent process lifecycle management
@@ -348,6 +350,7 @@ Projects can be stored in any directory (registered in `~/.autoforge/registry.db
 - `.autoforge/.agent.lock` - Lock file to prevent multiple agent instances
 - `.autoforge/allowed_commands.yaml` - Project-specific bash command allowlist (optional)
 - `.autoforge/validation/` - Validation artifacts (screenshots) captured while agents verify features - gitignored via `.autoforge/.gitignore`
+- `.autoforge/knowledge/` - User-uploaded markdown docs (requirements, research); every agent prompt is prefixed with a list of these files (`prompts.with_project_knowledge`). Managed via the book icon in the agent controls
 - `.autoforge/.gitignore` - Ignores runtime files
 - `.claude/skills/playwright-cli/` - Playwright CLI skill for browser automation
 - `.playwright/cli.config.json` - Browser configuration (headless, viewport, etc.)

@@ -135,6 +135,54 @@ def with_file_editing_rules(prompt: str) -> str:
     return prompt.rstrip("\n") + "\n\n" + FILE_EDITING_RULES
 
 
+KNOWLEDGE_FILE_EXTENSIONS = (".md", ".markdown", ".txt")
+
+
+def get_knowledge_files(project_dir: Path) -> list[Path]:
+    """List the project knowledge documents in ``.autoforge/knowledge/``, sorted by name."""
+    from api.safe_project_io import is_link_or_junction
+    from autoforge_paths import get_knowledge_dir
+
+    knowledge_dir = get_knowledge_dir(project_dir)
+    # The agent can write .autoforge/: never list through or as a link it planted
+    if is_link_or_junction(knowledge_dir.parent) or is_link_or_junction(knowledge_dir) or not knowledge_dir.is_dir():
+        return []
+    return sorted(
+        (p for p in knowledge_dir.iterdir()
+         if not is_link_or_junction(p) and p.is_file() and p.suffix.lower() in KNOWLEDGE_FILE_EXTENSIONS),
+        key=lambda p: p.name.lower(),
+    )
+
+
+def with_project_knowledge(prompt: str, project_dir: Path | None) -> str:
+    """Prepend a pointer to the project's knowledge documents, if any exist.
+
+    Knowledge documents are user-uploaded markdown files (requirements docs,
+    research notes, ...) that give the agent more context than app_spec.txt.
+    They are referenced by path rather than inlined so large documents don't
+    bloat every session's prompt.
+    """
+    if project_dir is None:
+        return prompt
+    files = get_knowledge_files(project_dir)
+    if not files:
+        return prompt
+
+    listing = "\n".join(f"- `.autoforge/knowledge/{p.name}`" for p in files)
+    section = f"""## PROJECT KNOWLEDGE
+
+The user has provided reference documents with additional requirements and background
+for this project. Read them (with the Read tool) before planning or implementing anything,
+and treat them as authoritative context alongside the app spec:
+
+{listing}
+
+---
+
+"""
+    return section + prompt
+
+
 def get_initializer_prompt(project_dir: Path | None = None) -> str:
     """Load the initializer prompt (project-specific if available)."""
     return load_prompt("initializer_prompt", project_dir)
