@@ -37,6 +37,19 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _iso_utc(value: Optional[datetime]) -> Optional[str]:
+    """ISO string with an explicit UTC offset.
+
+    SQLite returns the stored UTC datetimes without tzinfo; without the offset
+    browsers parse them as local time and show history shifted.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
 class Conversation(Base):
     """A conversation with the assistant for a project."""
     __tablename__ = "conversations"
@@ -189,8 +202,8 @@ def get_conversations(project_dir: Path, project_name: str) -> list[dict]:
                 "id": c.Conversation.id,
                 "project_name": c.Conversation.project_name,
                 "title": c.Conversation.title,
-                "created_at": c.Conversation.created_at.isoformat() if c.Conversation.created_at else None,
-                "updated_at": c.Conversation.updated_at.isoformat() if c.Conversation.updated_at else None,
+                "created_at": _iso_utc(c.Conversation.created_at),
+                "updated_at": _iso_utc(c.Conversation.updated_at),
                 "message_count": c.message_count,
             }
             for c in conversations
@@ -210,14 +223,14 @@ def get_conversation(project_dir: Path, conversation_id: int) -> Optional[dict]:
             "id": conversation.id,
             "project_name": conversation.project_name,
             "title": conversation.title,
-            "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
-            "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else None,
+            "created_at": _iso_utc(conversation.created_at),
+            "updated_at": _iso_utc(conversation.updated_at),
             "messages": [
                 {
                     "id": m.id,
                     "role": m.role,
                     "content": m.content,
-                    "timestamp": m.timestamp.isoformat() if m.timestamp else None,
+                    "timestamp": _iso_utc(m.timestamp),
                 }
                 for m in sorted(conversation.messages, key=lambda x: x.timestamp or datetime.min)
             ],
@@ -276,7 +289,7 @@ def add_message(project_dir: Path, conversation_id: int, role: str, content: str
             "id": message.id,
             "role": message.role,
             "content": message.content,
-            "timestamp": message.timestamp.isoformat() if message.timestamp else None,
+            "timestamp": _iso_utc(message.timestamp),
         }
     finally:
         session.close()
@@ -297,7 +310,7 @@ def get_messages(project_dir: Path, conversation_id: int) -> list[dict]:
                 "id": m.id,
                 "role": m.role,
                 "content": m.content,
-                "timestamp": m.timestamp.isoformat() if m.timestamp else None,
+                "timestamp": _iso_utc(m.timestamp),
             }
             for m in messages
         ]
