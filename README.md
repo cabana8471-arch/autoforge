@@ -383,11 +383,11 @@ When test progress increases, the agent sends:
 }
 ```
 
-### Alternative API Providers (GLM, Ollama, Kimi, Custom)
+### Alternative API Providers (GLM, Ollama, Kimi, Gemini, Custom)
 
 Alternative providers are configured via the **Settings UI** (gear icon > API Provider). Select your provider, set the base URL, auth token, and model directly in the UI — no `.env` changes needed.
 
-Available providers: **Claude** (default), **GLM** (Zhipu AI), **Ollama** (local models), **Kimi** (Moonshot), **Custom**
+Available providers: **Claude** (default), **GLM** (Zhipu AI), **Ollama** (local models), **Kimi** (Moonshot), **Gemini** (Google, via LiteLLM), **Custom**
 
 For GLM 4.x / GLM 5 (Zhipu AI / Z.ai):
 1. Get an API key at [z.ai](https://z.ai) (international) or [open.bigmodel.cn](https://open.bigmodel.cn) (mainland China).
@@ -398,6 +398,17 @@ For GLM 4.x / GLM 5 (Zhipu AI / Z.ai):
 A 50-minute request timeout (`API_TIMEOUT_MS=3000000`, as recommended by Z.ai) is applied automatically for GLM so long planning turns don't time out.
 
 For Ollama, install [Ollama v0.14.0+](https://ollama.com), run `ollama serve`, and pull a coding model (e.g., `ollama pull qwen3-coder`). Then select "Ollama" in the Settings UI.
+
+For Google Gemini, the agent still runs on the Claude Agent SDK, which speaks the Anthropic Messages API. Gemini doesn't, so requests go through a [LiteLLM](https://docs.litellm.ai/) proxy that translates them:
+
+```bash
+pip install 'litellm[proxy]'
+export GEMINI_API_KEY=...              # https://aistudio.google.com/apikey
+export LITELLM_MASTER_KEY=sk-anything
+litellm --config examples/litellm_gemini_config.yaml --port 4000
+```
+
+Then select "Google Gemini (via LiteLLM)" in the Settings UI, enter the `LITELLM_MASTER_KEY` value as the auth token, and pick a model (`gemini-2.5-pro`, `gemini-2.5-flash`, or any `model_name` you add to the proxy config). Gemini models have not been tuned for Claude Code's tool-use prompts, so expect lower feature pass rates than with Claude.
 
 ### Using Vertex AI
 

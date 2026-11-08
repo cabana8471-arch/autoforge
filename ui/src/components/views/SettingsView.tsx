@@ -23,6 +23,7 @@ const PROVIDER_INFO_TEXT: Record<string, string> = {
   kimi: 'Get an API key at kimi.com',
   glm: 'Get an API key at z.ai (international) or open.bigmodel.cn (China — set Base URL to https://open.bigmodel.cn/api/anthropic). Any GLM model ID can be entered below.',
   ollama: 'Run models locally. Install from ollama.com',
+  gemini: 'Requires a LiteLLM proxy translating to the Gemini API. See examples/litellm_gemini_config.yaml',
   custom: 'Connect to any OpenAI-compatible API endpoint.',
 }
 
@@ -119,8 +120,8 @@ export function SettingsView() {
   const currentProviderInfo: ProviderInfo | undefined = providers.find(p => p.id === currentProvider)
   const isAlternativeProvider = currentProvider !== 'claude'
   const showAuthField = isAlternativeProvider && currentProviderInfo?.requires_auth
-  const showBaseUrlField = currentProvider === 'custom' || currentProvider === 'azure' || currentProvider === 'glm'
-  const showCustomModelInput = currentProvider === 'custom' || currentProvider === 'ollama' || currentProvider === 'glm'
+  const showBaseUrlField = currentProvider === 'custom' || currentProvider === 'azure' || currentProvider === 'glm' || currentProvider === 'gemini'
+  const showCustomModelInput = currentProvider === 'custom' || currentProvider === 'ollama' || currentProvider === 'glm' || currentProvider === 'gemini'
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -394,7 +395,7 @@ export function SettingsView() {
                       ))}
                     </div>
                   )}
-                  {/* Custom model input for Ollama/Custom/GLM */}
+                  {/* Custom model input for Ollama/Custom/GLM/Gemini */}
                   {showCustomModelInput && (
                     <div className="flex gap-2 pt-1">
                       <input
