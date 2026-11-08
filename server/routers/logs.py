@@ -17,12 +17,15 @@ from pathlib import Path
 from typing import Literal, Optional, cast
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
+
+# Read size when streaming an export download
+_EXPORT_CHUNK_SIZE = 64 * 1024
 
 
 def _get_project_path(project_name: str) -> Path | None:
@@ -317,13 +320,24 @@ async def download_export(project_name: str, filename: str):
 
     from urllib.parse import quote
 
-    from api.safe_project_io import read_project_file
+    from api.safe_project_io import open_project_file_for_read
     try:
-        # Read without following a link the agent planted (FileResponse would follow it)
-        content = read_project_file(project_dir, export_path)
+        # Open without following a link the agent planted (FileResponse would follow it)
+        export_file = open_project_file_for_read(project_dir, export_path)
     except OSError:
         raise HTTPException(status_code=500, detail="Export file is not readable")
+
+    def stream():
+        # Streamed from the descriptor opened above, like FileResponse (exports can be large)
+        try:
+            while chunk := export_file.read(_EXPORT_CHUNK_SIZE):
+                yield chunk
+        finally:
+            export_file.close()
+
     # Same Content-Disposition as FileResponse(filename=...)
     quoted = quote(filename)
     disposition = f"attachment; filename*=utf-8''{quoted}" if quoted != filename else f'attachment; filename="{filename}"'
-    return Response(content, media_type="application/octet-stream", headers={"Content-Disposition": disposition})
+    return StreamingResponse(
+        stream(), media_type="application/octet-stream", headers={"Content-Disposition": disposition}
+    )
