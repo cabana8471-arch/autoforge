@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from api.safe_project_io import read_project_text
+from autoforge_paths import get_security_reports_dir
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ async def run_security_scan(request: ScanRequest):
     - Hardcoded secrets (API keys, passwords, tokens)
     - Code vulnerability patterns (SQL injection, XSS, etc.)
 
-    Results are saved to .autocoder/security-reports/
+    Results are saved to the project's security-reports/ directory (.autoforge/ for current projects)
     """
     project_dir = _get_project_path(request.project_name)
     if not project_dir:
@@ -150,7 +151,7 @@ async def list_reports(project_name: str):
     if not project_dir:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    reports_dir = project_dir / ".autocoder" / "security-reports"
+    reports_dir = get_security_reports_dir(project_dir)
     if not reports_dir.exists():
         return ReportListResponse(reports=[], count=0)
 
@@ -178,7 +179,7 @@ async def get_report(project_name: str, filename: str):
     if not filename.startswith("security_scan_") or not filename.endswith(".json"):
         raise HTTPException(status_code=400, detail="Invalid report filename")
 
-    report_path = project_dir / ".autocoder" / "security-reports" / filename
+    report_path = get_security_reports_dir(project_dir) / filename
     if not report_path.exists():
         raise HTTPException(status_code=404, detail="Report not found")
 
@@ -197,7 +198,7 @@ async def get_latest_report(project_name: str):
     if not project_dir:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    reports_dir = project_dir / ".autocoder" / "security-reports"
+    reports_dir = get_security_reports_dir(project_dir)
     if not reports_dir.exists():
         raise HTTPException(status_code=404, detail="No reports found")
 

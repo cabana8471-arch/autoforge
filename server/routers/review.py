@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from api.safe_project_io import read_project_text, unlink_project_file
+from autoforge_paths import get_review_reports_dir
 from registry import get_project_path
 from review_agent import ReviewAgent
 
@@ -242,7 +243,7 @@ def list_reports(project_name: str):
     List all review reports for a project.
     """
     project_dir = get_project_dir(project_name)
-    reports_dir = project_dir / ".autocoder" / "review-reports"
+    reports_dir = get_review_reports_dir(project_dir)
 
     if not reports_dir.exists():
         return ReportListResponse(reports=[], count=0)
@@ -281,7 +282,7 @@ def get_report(project_name: str, filename: str):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     project_dir = get_project_dir(project_name)
-    report_path = project_dir / ".autocoder" / "review-reports" / filename
+    report_path = get_review_reports_dir(project_dir) / filename
 
     if not report_path.exists():
         raise HTTPException(status_code=404, detail=f"Report not found: {filename}")
@@ -368,7 +369,7 @@ def delete_report(project_name: str, filename: str):
     Delete a specific review report.
     """
     project_dir = get_project_dir(project_name)
-    report_path = project_dir / ".autocoder" / "review-reports" / filename
+    report_path = get_review_reports_dir(project_dir) / filename
 
     # Validate filename to prevent path traversal
     if ".." in filename or "/" in filename or "\\" in filename:
