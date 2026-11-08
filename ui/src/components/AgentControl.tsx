@@ -87,6 +87,10 @@ export function AgentControl({ projectName, status, defaultConcurrency = 3, isDe
     testingAgentRatio: settings?.testing_agent_ratio,
   })
   const handleStop = () => stopAgent.mutate()
+  // The server answers a refused start (cost limit, another instance, ...) with success=false
+  const startRefusal = startAgent.data && !startAgent.data.success
+    ? startAgent.data.message
+    : startAgent.error?.message
 
   const isStopped = status === 'stopped' || status === 'crashed'
 
@@ -135,6 +139,13 @@ export function AgentControl({ projectName, status, defaultConcurrency = 3, isDe
             <Clock size={14} />
             Next: {formatNextRun(nextRun.next_start)}
           </Badge>
+        )}
+
+        {/* Why the last start was refused (shown until the next attempt) */}
+        {isStopped && startRefusal && (
+          <span role="alert" className="max-w-md text-xs text-destructive" title={startRefusal}>
+            {startRefusal}
+          </span>
         )}
 
         {/* Start/Stop/Pause/Resume buttons */}
