@@ -217,3 +217,17 @@ def test_wal_probe_does_not_follow_planted_probe_link(project: Path, outside: Pa
     database._probe_wal_support(project / ".autoforge")
 
     assert list(outside.iterdir()) == []
+
+
+def test_assistant_db_opens_for_a_legacy_project_without_autoforge_dir(tmp_path):
+    """A re-registered legacy project (features.db at the root, no .autoforge/) must not 500 the assistant."""
+    from server.services import assistant_database as adb
+
+    project = tmp_path / "legacy"
+    project.mkdir()
+    (project / "features.db").write_bytes(b"")
+    try:
+        conversation = adb.create_conversation(project, "legacy")
+        assert adb.get_conversation(project, conversation.id) is not None
+    finally:
+        adb.dispose_engine(project)

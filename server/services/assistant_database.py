@@ -104,6 +104,11 @@ def get_engine(project_dir: Path):
             # Refuse an assistant.db the agent redirected with a link (clear error)
             from api.database import check_project_database_path
             check_project_database_path(project_dir, db_path)
+            if db_path.parent != project_dir:
+                # A re-registered legacy project has no .autoforge/ yet; SQLite cannot
+                # create the file without its directory (never through a planted link)
+                from api.safe_project_io import make_project_dirs
+                make_project_dirs(project_dir, db_path.parent)
             # Use as_posix() for cross-platform compatibility with SQLite connection strings
             db_url = f"sqlite:///{db_path.as_posix()}"
             engine = create_engine(
