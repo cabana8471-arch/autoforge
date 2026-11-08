@@ -1774,6 +1774,32 @@ class TestPlantedLinks(unittest.TestCase):
         self.assertTrue((backup_dir / "notes.md").exists())
         self.assertEqual((self.outside / "id_rsa").read_text(), "secret")
 
+    def test_detach_with_planted_gitignore_link_succeeds_with_warning(self):
+        """update_gitignore runs after the files are already in the backup: a refused
+        .gitignore must not turn the detach into an error (500) half-way."""
+        import os
+
+        for kind in ("symlink", "hardlink"):
+            with self.subTest(kind=kind):
+                project = self.project_dir / kind
+                (project / ".autoforge").mkdir(parents=True)
+                (project / ".autoforge" / "features.db").write_bytes(b"")
+                target = self.outside / f"gitignore-{kind}"
+                target.write_text("node_modules/\n")
+                if kind == "symlink":
+                    (project / ".gitignore").symlink_to(target)
+                else:
+                    os.link(target, project / ".gitignore")
+
+                success, message, manifest, _restored = detach.detach_project(str(project), force=True)
+
+                self.assertTrue(success)
+                self.assertIn(".gitignore", message)
+                self.assertIn("warning", message)
+                self.assertIsNotNone(manifest)
+                self.assertTrue((project / detach.BACKUP_DIR / detach.MANIFEST_FILE).exists())
+                self.assertEqual(target.read_text(), "node_modules/\n")
+
     def test_gitignore_not_created_through_dangling_symlink(self):
         (self.project_dir / ".gitignore").symlink_to(self.outside / "created")
 
