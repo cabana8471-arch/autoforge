@@ -2,8 +2,8 @@
 API Provider Environment Tests
 ==============================
 
-Tests for get_effective_sdk_env() in registry.py: GLM (Zhipu AI / Z.ai) and
-Gemini (through a LiteLLM proxy).
+Tests for get_effective_sdk_env() in registry.py: GLM (Zhipu AI / Z.ai),
+Gemini (through a LiteLLM proxy), Kimi Code and Moonshot Platform.
 
 Run with: python -m pytest test_api_providers.py -v
 """
@@ -94,6 +94,47 @@ def test_gemini_env_overrides(settings):
     assert env["ANTHROPIC_BASE_URL"] == "http://proxy.internal:8080"
     assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "gemini-2.5-flash"
     assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+
+
+def _env_with(monkeypatch: pytest.MonkeyPatch, settings: dict[str, str]) -> dict[str, str]:
+    monkeypatch.setattr(registry, "get_all_settings", lambda: settings)
+    return registry.get_effective_sdk_env()
+
+
+def test_kimi_code_uses_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _env_with(monkeypatch, {"api_provider": "kimi", "api_auth_token": "sk-kimi-abc"})
+    assert env["ANTHROPIC_BASE_URL"] == "https://api.kimi.com/coding/"
+    assert env["ANTHROPIC_API_KEY"] == "sk-kimi-abc"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == ""
+    assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "kimi-k2.5"
+
+
+def test_moonshot_platform_uses_auth_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _env_with(monkeypatch, {"api_provider": "moonshot", "api_auth_token": "sk-platform"})
+    assert env["ANTHROPIC_BASE_URL"] == "https://api.moonshot.ai/anthropic"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-platform"
+    assert env["ANTHROPIC_API_KEY"] == ""
+    assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "kimi-k2.5"
+
+
+def test_moonshot_base_url_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _env_with(monkeypatch, {
+        "api_provider": "moonshot",
+        "api_base_url": "https://api.moonshot.cn/anthropic",
+        "api_auth_token": "sk-platform",
+    })
+    assert env["ANTHROPIC_BASE_URL"] == "https://api.moonshot.cn/anthropic"
+
+
+def test_auth_token_whitespace_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _env_with(monkeypatch, {"api_provider": "kimi", "api_auth_token": "  sk-kimi-abc\n"})
+    assert env["ANTHROPIC_API_KEY"] == "sk-kimi-abc"
+
+
+def test_blank_base_url_falls_back_to_provider_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _env_with(monkeypatch, {"api_provider": "moonshot", "api_base_url": "  "})
+    assert env["ANTHROPIC_BASE_URL"] == "https://api.moonshot.ai/anthropic"
 
 
 if __name__ == "__main__":

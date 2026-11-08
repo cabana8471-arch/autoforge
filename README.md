@@ -385,9 +385,9 @@ When test progress increases, the agent sends:
 
 ### Alternative API Providers (GLM, Ollama, Kimi, Gemini, Custom)
 
-Alternative providers are configured via the **Settings UI** (gear icon > API Provider). Select your provider, set the base URL, auth token, and model directly in the UI — no `.env` changes needed.
+Alternative providers are configured via the **Settings UI** (gear icon > API Provider). Select your provider, set the base URL, auth token, and model directly in the UI — no `.env` changes needed. Switching provider clears the saved auth token (a key is never sent to another provider), so paste the new provider's key after switching.
 
-Available providers: **Claude** (default), **GLM** (Zhipu AI), **Ollama** (local models), **Kimi** (Moonshot), **Gemini** (Google, via LiteLLM), **Custom**
+Available providers: **Claude** (default), **GLM** (Zhipu AI), **Ollama** (local models), **Kimi Code** (kimi.com subscription), **Moonshot Platform** (Kimi K2.5 via platform.moonshot.ai), **Gemini** (Google, via LiteLLM), **Custom**
 
 For GLM 4.x / GLM 5 (Zhipu AI / Z.ai):
 1. Get an API key at [z.ai](https://z.ai) (international) or [open.bigmodel.cn](https://open.bigmodel.cn) (mainland China).
@@ -396,6 +396,8 @@ For GLM 4.x / GLM 5 (Zhipu AI / Z.ai):
 4. Mainland China accounts: change the Base URL to `https://open.bigmodel.cn/api/anthropic` (default is `https://api.z.ai/api/anthropic`).
 
 A 50-minute request timeout (`API_TIMEOUT_MS=3000000`, as recommended by Z.ai) is applied automatically for GLM so long planning turns don't time out.
+
+Kimi keys come in two kinds that are not interchangeable: Kimi Code subscription keys (`sk-kimi-...`, from kimi.com) only work with the **Kimi Code** provider, and pay-as-you-go keys from platform.moonshot.ai only work with **Moonshot Platform**. Using the wrong one returns `401 authentication_error`. Mainland China users of the platform API can set the base URL to `https://api.moonshot.cn/anthropic`.
 
 For Ollama, install [Ollama v0.14.0+](https://ollama.com), run `ollama serve`, and pull a coding model (e.g., `ollama pull qwen3-coder`). Then select "Ollama" in the Settings UI.
 

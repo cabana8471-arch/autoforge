@@ -145,7 +145,8 @@ python -m pytest test_project_database_links.py  # features/assistant/logs .db (
 python -m pytest test_onboard_project.py       # Onboarding: spec-only write hook, passes=true only in the onboard session
 python -m pytest test_chat_ws_keepalive.py     # Chat WebSockets: long turns survive pings, network drop finishes the turn, closing the chat cancels it
 python -m pytest test_allowlist_protection.py     # The agent cannot edit the project allowlist (settings deny, sandbox denyWrite, Bash hook)
-python -m pytest test_api_providers.py        # API provider env tests (GLM, etc.)
+python -m pytest test_api_providers.py        # API provider env tests (GLM, Gemini, Kimi Code, Moonshot)
+python -m pytest test_settings_provider_switch.py  # Provider switch resets base URL and clears the previous key
 ```
 
 ### React UI
@@ -480,9 +481,9 @@ Run coding agents via Google Cloud Vertex AI:
 
 ### Alternative API Providers (GLM, Ollama, Kimi, Gemini, Custom)
 
-Alternative providers are configured via the **Settings UI** (gear icon > API Provider section). Select a provider, set the base URL, auth token, and model — no `.env` changes needed.
+Alternative providers are configured via the **Settings UI** (gear icon > API Provider section). Select a provider, set the base URL, auth token, and model — no `.env` changes needed. Switching provider resets the base URL to the new provider's default and clears the saved auth token, so one provider's key is never sent to another.
 
-**Available providers:** Claude (default), GLM (Zhipu AI), Ollama (local models), Kimi (Moonshot), Gemini (Google, via LiteLLM proxy), Custom
+**Available providers:** Claude (default), GLM (Zhipu AI), Ollama (local models), Kimi Code (kimi.com subscription keys), Moonshot Platform (platform.moonshot.ai keys), Gemini (Google, via LiteLLM proxy), Custom
 
 **Ollama notes:**
 - Requires Ollama v0.14.0+ with Anthropic API compatibility

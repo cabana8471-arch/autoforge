@@ -20,7 +20,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 const PROVIDER_INFO_TEXT: Record<string, string> = {
   claude: 'Default provider. Uses Claude CLI credentials. API key auth is recommended.',
-  kimi: 'Get an API key at kimi.com',
+  kimi: 'For Kimi Code subscription keys (sk-kimi-...) from kimi.com. Using a platform.moonshot.ai key? Pick "Moonshot Platform" instead.',
+  moonshot: 'For pay-as-you-go keys from platform.moonshot.ai. In mainland China, set the base URL to https://api.moonshot.cn/anthropic.',
   glm: 'Get an API key at z.ai (international) or open.bigmodel.cn (China — set Base URL to https://open.bigmodel.cn/api/anthropic). Any GLM model ID can be entered below.',
   ollama: 'Run models locally. Install from ollama.com',
   gemini: 'Requires a LiteLLM proxy translating to the Gemini API. See examples/litellm_gemini_config.yaml',
@@ -120,7 +121,7 @@ export function SettingsView() {
   const currentProviderInfo: ProviderInfo | undefined = providers.find(p => p.id === currentProvider)
   const isAlternativeProvider = currentProvider !== 'claude'
   const showAuthField = isAlternativeProvider && currentProviderInfo?.requires_auth
-  const showBaseUrlField = currentProvider === 'custom' || currentProvider === 'azure' || currentProvider === 'glm' || currentProvider === 'gemini'
+  const showBaseUrlField = currentProvider === 'custom' || currentProvider === 'azure' || currentProvider === 'glm' || currentProvider === 'gemini' || currentProvider === 'moonshot'
   const showCustomModelInput = currentProvider === 'custom' || currentProvider === 'ollama' || currentProvider === 'glm' || currentProvider === 'gemini'
 
   return (
@@ -351,6 +352,7 @@ export function SettingsView() {
                             placeholder={
                               currentProvider === 'azure' ? 'https://your-resource.services.ai.azure.com/anthropic'
                               : currentProvider === 'glm' ? 'https://api.z.ai/api/anthropic'
+                              : currentProvider === 'moonshot' ? 'https://api.moonshot.ai/anthropic'
                               : 'https://api.example.com/v1'
                             }
                             className="flex-1 py-1.5 px-3 text-sm border rounded-md bg-background"
