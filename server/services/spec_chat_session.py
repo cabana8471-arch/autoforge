@@ -197,21 +197,23 @@ class SpecChatSession:
 
         # Create security settings file (like client.py does)
         # This grants permissions for file operations in the project directory
+        from security import protected_config_paths
         security_settings = {
             "sandbox": {"enabled": False},  # Disable sandbox for spec creation
             "permissions": {
                 "defaultMode": "acceptEdits",
                 "allow": [
+                    # Read rules cover Glob/Grep and Edit rules cover Write: the CLI
+                    # ignores (and warns about) Write/Glob/Grep path rules
                     "Read(./**)",
-                    "Write(./**)",
                     "Edit(./**)",
-                    "Glob(./**)",
                     "WebFetch",
                     "WebSearch",
                 ],
                 # No terminal in the web UI means nobody can approve a shell
-                # command, so remove shell access outright (see issue #14)
-                "deny": NO_SHELL_TOOLS,
+                # command, so remove shell access outright (see issue #14).
+                # The project allowlist is edited only by the user.
+                "deny": [*NO_SHELL_TOOLS, *(f"Edit(/{path})" for path in protected_config_paths(self.project_dir))],
             },
         }
         from api.safe_project_io import write_project_file

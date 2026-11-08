@@ -778,6 +778,23 @@ def load_org_config() -> Optional[dict]:
         return None
 
 
+PROJECT_ALLOWLIST_NAME = "allowed_commands.yaml"
+# Project-relative locations of the allowlist (current first, then the legacy fallback)
+PROJECT_ALLOWLIST_FILES = (f".autoforge/{PROJECT_ALLOWLIST_NAME}", f".autocoder/{PROJECT_ALLOWLIST_NAME}")
+# Commands that may name the allowlist in a Bash command (they only read it)
+ALLOWLIST_READ_COMMANDS = frozenset({"cat", "head", "tail", "grep", "less", "more", "wc", "ls", "diff", "stat", "file"})
+
+
+def protected_config_paths(project_dir: Path) -> list[str]:
+    """Absolute paths of the project allowlist files, which only the user may edit.
+
+    The allowlist widens what the agent may run, so agent settings deny the file
+    tools on these paths and make them read-only inside the Bash sandbox.
+    """
+    root = project_dir.resolve()
+    return [str(root / relative) for relative in PROJECT_ALLOWLIST_FILES]
+
+
 def load_project_commands(project_dir: Path) -> Optional[dict]:
     """
     Load allowed commands from project-specific YAML config.
@@ -1320,6 +1337,17 @@ def _validate_command_line(
     """Validate the commands of one line (no newlines or substitutions) against the allowlist."""
     commands = extract_commands(line)
 
+    # The project allowlist widens what the agent may run: the agent may read it, never change it.
+    # (The Bash sandbox also mounts it read-only; this gives the agent the reason.)
+    if PROJECT_ALLOWLIST_NAME in line and (">" in line or any(c not in ALLOWLIST_READ_COMMANDS for c in commands)):
+        return {
+            "decision": "block",
+            "reason": (
+                f"Only the user can change {PROJECT_ALLOWLIST_FILES[0]}. "
+                "Do not edit it; if a command is missing, tell the user which one and why."
+            ),
+        }
+
     # Split into segments for per-command validation
     segments = split_command_segments(line)
 
@@ -1336,9 +1364,9 @@ def _validate_command_line(
         if not is_command_allowed(cmd, allowed_commands):
             # Provide helpful error message with config hint
             error_msg = f"Command '{cmd}' is not allowed.\n"
-            error_msg += "To allow this command:\n"
-            error_msg += "  1. Add to .autoforge/allowed_commands.yaml for this project, OR\n"
-            error_msg += "  2. Request mid-session approval (the agent can ask)\n"
+            error_msg += (
+                f"Ask the user to add it to {PROJECT_ALLOWLIST_FILES[0]} (only the user can change that file).\n"
+            )
             error_msg += "Note: Some commands are blocked at org-level and cannot be overridden."
             return {
                 "decision": "block",

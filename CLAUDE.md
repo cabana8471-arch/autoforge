@@ -144,6 +144,7 @@ python -m pytest test_project_read_sites.py    # Files sent to agent prompts or 
 python -m pytest test_project_database_links.py  # features/assistant/logs .db (+ -wal/-shm/-journal) refused behind a planted link
 python -m pytest test_onboard_project.py       # Onboarding: spec-only write hook, passes=true only in the onboard session
 python -m pytest test_chat_ws_keepalive.py     # Chat WebSockets: long turns survive pings, network drop finishes the turn, closing the chat cancels it
+python -m pytest test_allowlist_protection.py     # The agent cannot edit the project allowlist (settings deny, sandbox denyWrite, Bash hook)
 ```
 
 ### React UI
@@ -449,6 +450,7 @@ blocked_commands:
 - `rm` targets must resolve inside the project directory (blocks `/`, `~`, `.`, `..`, `$VAR`, `{a,b}` brace expansion, bare `*` at the project root, and paths escaping the project, including via symlinks followed by a trailing slash or glob)
 - Commands after a newline, inside `$(...)` or backticks (also within double quotes and unquoted heredocs) and in `bash -c` / `sh -c` payloads (also `-lc`, `env bash -c`) are validated like top-level commands; quoted heredoc bodies and single-quoted text are data
 - Org-level blocked commands cannot be overridden by project configs
+- Only the user edits `.autoforge/allowed_commands.yaml`: the agent settings deny the file tools on it (`Edit(//<abs path>)`), `sandbox.filesystem.denyWrite` makes it read-only for Bash, and the Bash hook refuses commands that would change it (spec chat sessions deny it too)
 
 **Files:**
 - `security.py` - Command validation logic and hardcoded blocklist

@@ -382,9 +382,7 @@ class ExpandChatSession:
             "permissions": {
                 "defaultMode": "bypassPermissions",
                 "allow": [
-                    "Read(./**)",
-                    "Glob(./**)",
-                    "Grep(./**)",
+                    "Read(./**)",  # covers Glob and Grep (the CLI ignores Glob/Grep path rules)
                     *([] if is_onboard else web_tools),
                     *EXPAND_FEATURE_TOOLS,
                 ],

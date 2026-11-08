@@ -290,9 +290,7 @@ class AssistantChatSession:
 
         # Build permissions list for assistant access (read + feature management)
         permissions_list = [
-            "Read(./**)",
-            "Glob(./**)",
-            "Grep(./**)",
+            "Read(./**)",  # covers Glob and Grep (the CLI ignores Glob/Grep path rules)
             "WebFetch",
             "WebSearch",
             *ASSISTANT_FEATURE_TOOLS,

@@ -508,10 +508,13 @@ Command 'sudo' is blocked at organization level and cannot be approved.
 Or:
 ```text
 Command 'wget' is not allowed.
-To allow this command:
-  1. Add to .autoforge/allowed_commands.yaml for this project, OR
-  2. Request mid-session approval (the agent can ask)
+Ask the user to add it to .autoforge/allowed_commands.yaml (only the user can change that file).
+Note: Some commands are blocked at org-level and cannot be overridden.
 ```
+
+The agent cannot change `.autoforge/allowed_commands.yaml` (or the legacy
+`.autocoder/` copy): its file tools are denied on it, the Bash sandbox mounts it
+read-only, and the Bash hook refuses commands that would write it. Edit it by hand.
 
 ---
 

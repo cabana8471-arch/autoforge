@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from env_constants import find_claude_cli
 from quality_gates import QUALITY_GATE_ENV_VARS
-from security import SENSITIVE_DIRECTORIES, bash_security_hook
+from security import SENSITIVE_DIRECTORIES, bash_security_hook, protected_config_paths
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -397,10 +397,9 @@ def create_client(
     permissions_list = [
         # Allow all file operations within the project directory
         "Read(./**)",
-        "Write(./**)",
+        # Read rules cover Glob/Grep and Edit rules cover Write: the CLI ignores
+        # (and warns about) Write/Glob/Grep path rules
         "Edit(./**)",
-        "Glob(./**)",
-        "Grep(./**)",
         # Bash permission granted here, but actual commands are validated
         # by the bash_security_hook (see security.py for allowed commands)
         "Bash(*)",
@@ -415,19 +414,27 @@ def create_client(
     # Paths are validated, canonicalized, and checked against sensitive blocklist
     extra_read_paths = get_extra_read_paths()
     for path in extra_read_paths:
-        # Add read-only permissions for each validated path
-        permissions_list.append(f"Read({path}/**)")
-        permissions_list.append(f"Glob({path}/**)")
-        permissions_list.append(f"Grep({path}/**)")
+        # Read-only access for each validated path; "//" marks an absolute path
+        # ("/x" would be relative to the project), Read rules cover Glob and Grep
+        permissions_list.append(f"Read(/{path.as_posix()}/**)")
 
     # Create comprehensive security settings
     # Note: Using relative paths ("./**") restricts access to project directory
     # since cwd is set to project_dir
+    # The project allowlist widens what the agent may run: only the user edits it.
+    # Edit deny blocks the file tools ("//" = absolute path); denyWrite makes it
+    # read-only for sandboxed Bash, interpreters included.
+    protected_files = protected_config_paths(project_dir)
     security_settings = {
-        "sandbox": {"enabled": True, "autoAllowBashIfSandboxed": True},
+        "sandbox": {
+            "enabled": True,
+            "autoAllowBashIfSandboxed": True,
+            "filesystem": {"denyWrite": protected_files},
+        },
         "permissions": {
             "defaultMode": "acceptEdits",  # Auto-approve edits within allowed directories
             "allow": permissions_list,
+            "deny": [f"Edit(/{path})" for path in protected_files],
         },
     }
 
