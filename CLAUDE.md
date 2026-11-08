@@ -148,6 +148,8 @@ python -m pytest test_allowlist_protection.py     # The agent cannot edit the pr
 python -m pytest test_api_providers.py        # API provider env tests (GLM, Gemini, Kimi Code, Moonshot)
 python -m pytest test_settings_provider_switch.py  # Provider switch resets base URL and clears the previous key
 python -m pytest test_usage_tracker.py        # Token/cost tracking tests
+python -m pytest test_billing_utils.py        # Spend safeguards: billing stop, run cap from usage records, cost of an aborted session
+python -m pytest test_spend_stop_status.py    # Exit codes 3/4 are "stopped" with a reason, never "crashed" (no scheduler restart)
 ```
 
 ### React UI
@@ -202,6 +204,7 @@ Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publi
 - `rate_limit_utils.py` - Rate limit detection, retry parsing, exponential backoff with jitter
 - `quality_gates.py` - Lint/type-check auto-detection and enforcement before `feature_mark_passing`
 - `usage_tracker.py` - Per-session token/cost recording (from SDK `ResultMessage`) and per-project cost limit enforcement
+- `billing_utils.py` - Spend safeguards: billing-error detection (agents stop instead of retrying, exit code 3), `AUTOFORGE_MAX_BUDGET_USD` run cap (exit code 4); the orchestrator sums its run's `agent_usage` rows, never agent output
 - `api/database.py` - SQLAlchemy models (Feature, Schedule, ScheduleOverride)
 - `api/test_evidence.py` - Test evidence normalization; screenshots copied to `.autoforge/evidence/feature_<id>/`, shown in the feature modal
 - `api/safe_project_io.py` - Reads/writes project files from outside the agent sandbox without following agent-planted symlinks or hard links (dir_fd + O_NOFOLLOW walk, atomic replace); the `*_project_*` helpers (write/append/create-exclusive/mkdirs/read/copy-tree/unlink/remove-tree) raise `OSError` and fall back to a path-based symlink check without dir_fd (Windows). Settings files, configs, lock/drain files, scaffolding, prompt migrations and the layout migration write through them
@@ -561,7 +564,7 @@ When running with `--concurrency N` (N > 1; `--parallel` is a deprecated alias),
 
 - Every agent session records the SDK `ResultMessage` usage (input/output/cache tokens, `total_cost_usd`) into the `agent_usage` table of the project's `features.db`
 - Global setting `max_cost_usd` (Settings UI, "Cost Limit per Project"; 0 = unlimited) caps each project's cumulative spend
-- When the limit is reached: the orchestrator stops spawning agents (running ones finish), the single-agent loop exits, and `/agent/start` refuses to start
+- When the limit is reached: the orchestrator stops all agents, the single-agent loop exits (both with exit code 4, shown as `stopped` with the reason, never `crashed`, so the scheduler does not restart them), and `/agent/start` refuses to start. A spend or limit that cannot be read also refuses (fails closed)
 - API: `GET /api/projects/{name}/usage` (totals, limit, recent sessions), `DELETE /api/projects/{name}/usage` (reset spend)
 - Dashboard shows a Usage card; costs for non-Claude providers are estimates (CLI uses Anthropic pricing)
 

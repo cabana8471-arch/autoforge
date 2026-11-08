@@ -24,8 +24,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from api.safe_project_io import UnsafeProjectPathError, unlink_project_file  # noqa: E402
 from auth import AUTH_ERROR_HELP_SERVER as AUTH_ERROR_HELP  # noqa: E402
 from auth import is_auth_error
+from billing_utils import BILLING_ERROR_EXIT_CODE, BUDGET_EXCEEDED_EXIT_CODE  # noqa: E402
 from server.utils.process_utils import kill_process_tree
 from usage_tracker import CostCheckError, check_cost_limit, format_cost_limit_message
+
+# Agent exit codes that mean "stopped on purpose to stop spending", never a crash:
+# the scheduler restarts crashed runs, which would spend again.
+SPEND_STOP_REASONS = {
+    BILLING_ERROR_EXIT_CODE: "Agent stopped: the API reported an exhausted credit balance (billing error). "
+    "Add credits, then start the agent again.",
+    BUDGET_EXCEEDED_EXIT_CODE: "Agent stopped: a spending limit was reached (project cost limit in Settings "
+    "or AUTOFORGE_MAX_BUDGET_USD). Raise the limit or reset the project's usage to continue.",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +365,10 @@ class AgentProcessManager:
             # Check if process ended
             if self.process and self.process.poll() is not None:
                 exit_code = self.process.returncode
-                if exit_code != 0 and self.status in ("running", "pausing", "paused_graceful"):
+                if exit_code in SPEND_STOP_REASONS and self.status in ("running", "pausing", "paused_graceful"):
+                    await self._broadcast_output(SPEND_STOP_REASONS[exit_code])
+                    self.status = "stopped"
+                elif exit_code != 0 and self.status in ("running", "pausing", "paused_graceful"):
                     # Check buffered output for auth errors if we haven't detected one yet
                     if not auth_error_detected:
                         combined_output = '\n'.join(output_buffer)
@@ -725,7 +738,9 @@ class AgentProcessManager:
                     unlink_project_file(self.project_dir, get_pause_drain_path(self.project_dir), missing_ok=True)
                 except Exception:
                     pass
-                self.status = "crashed"
+                if poll in SPEND_STOP_REASONS:
+                    await self._broadcast_output(SPEND_STOP_REASONS[poll])
+                self.status = "stopped" if poll in SPEND_STOP_REASONS else "crashed"
                 self._remove_lock()
             return False
 

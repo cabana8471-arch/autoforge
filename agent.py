@@ -26,6 +26,15 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 
+from billing_utils import (
+    BILLING_ERROR_EXIT_CODE,
+    BILLING_ERROR_HELP,
+    BUDGET_EXCEEDED_EXIT_CODE,
+    MAX_BUDGET_ENV_VAR,
+    get_max_budget_usd,
+    is_billing_error,
+    uses_api_key_billing,
+)
 from client import create_client
 from progress import (
     count_passing_tests,
@@ -61,6 +70,8 @@ from usage_tracker import (
 
 # Configuration
 AUTO_CONTINUE_DELAY_SECONDS = 3
+# How long to wait for the ResultMessage (cost) of a session interrupted by the stuck guard
+RESULT_AFTER_INTERRUPT_TIMEOUT_SECONDS = 30
 
 # Abort a session after this many consecutive Write/Edit "file state" errors
 # (stale or missing Read) without a single successful write in between.
@@ -123,16 +134,42 @@ def _print_result_message(msg: ResultMessage) -> str:
 
 
 def _record_session_usage(
-    project_dir: Path, result_msg: ResultMessage, usage_context: Optional[dict[str, Any]]
+    project_dir: Path,
+    result_msg: ResultMessage,
+    usage_context: Optional[dict[str, Any]],
+    cost_tracker: Optional[list[float]] = None,
 ) -> None:
-    """Store the session's token usage and cost (the cost is already in the [Result] line)."""
+    """Store the session's token usage and cost (the cost is already in the [Result] line).
+
+    The cost comes from the SDK's ResultMessage, never from text the model wrote.
+    """
     usage = extract_usage(result_msg)
     record_usage(project_dir, usage, **(usage_context or {}))
+    if cost_tracker is not None and result_msg.total_cost_usd is not None:
+        cost_tracker.append(float(result_msg.total_cost_usd))
     print(
         f"[Usage] {usage['input_tokens']:,} in / {usage['output_tokens']:,} out tokens "
         f"(cache: {usage['cache_read_tokens']:,} read, {usage['cache_creation_tokens']:,} written)",
         flush=True,
     )
+
+
+async def _receive_result_after_interrupt(
+    client: ClaudeSDKClient, timeout: float = RESULT_AFTER_INTERRUPT_TIMEOUT_SECONDS
+) -> Optional[ResultMessage]:
+    """Read what the CLI sends after an interrupt until the turn's ResultMessage (or a timeout)."""
+
+    async def read() -> Optional[ResultMessage]:
+        async for msg in client.receive_response():
+            if isinstance(msg, ResultMessage):
+                return msg
+        return None
+
+    try:
+        return await asyncio.wait_for(read(), timeout)
+    except asyncio.TimeoutError:
+        print("   (no result after the interrupt; this session's cost is not recorded)", flush=True)
+        return None
 
 
 def _print_limit_warning(response: str, delay_seconds: int, reset_at: Optional[datetime]) -> None:
@@ -160,6 +197,7 @@ async def run_agent_session(
     message: str,
     project_dir: Path,
     usage_context: Optional[dict[str, Any]] = None,
+    cost_tracker: Optional[list[float]] = None,
 ) -> tuple[str, str]:
     """
     Run a single agent session using Claude Agent SDK.
@@ -170,13 +208,19 @@ async def run_agent_session(
         project_dir: Project directory path
         usage_context: Extra fields (agent_type, feature_ids, model) stored with
             the session's token/cost usage record
+        cost_tracker: Optional list; the session's reported cost (USD) is
+            appended to it when the SDK provides one.
 
     Returns:
         (status, response_text) where status is:
         - "continue" if agent should continue working
+        - "rate_limit" if a rate limit was hit (response_text is retry seconds or "unknown")
+        - "billing" if the API reported exhausted credits (response_text is the error)
         - "error" if an error occurred
     """
     print("Sending prompt to Claude Agent SDK...\n")
+
+    billing_error: Optional[str] = None
 
     try:
         # Send the query
@@ -202,12 +246,21 @@ async def run_agent_session(
 
                     # Handle AssistantMessage (text and tool use)
                     if msg_type == "AssistantMessage" and hasattr(msg, "content"):
+                        # API errors (e.g. "Credit balance is too low") arrive as
+                        # synthetic assistant messages. Newer SDKs tag them with
+                        # an error type; older ones only mark the model.
+                        msg_error = getattr(msg, "error", None)
+                        is_api_error = msg_error is not None or getattr(msg, "model", "") == "<synthetic>"
+                        if msg_error == "billing_error":
+                            billing_error = "billing_error"
                         for block in msg.content:
                             block_type = type(block).__name__
 
                             if block_type == "TextBlock" and hasattr(block, "text"):
                                 response_text += block.text
                                 print(block.text, end="", flush=True)
+                                if is_api_error and is_billing_error(block.text):
+                                    billing_error = block.text
                             elif block_type == "ToolUseBlock" and hasattr(block, "name"):
                                 print(f"\n[Tool: {block.name}]", flush=True)
                                 tool_use_id = getattr(block, "id", None)
@@ -260,6 +313,8 @@ async def run_agent_session(
                             # Surface errors in the response so rate-limit
                             # detection in the caller can see them
                             response_text += f"\n{error_text}"
+                            if is_billing_error(error_text):
+                                billing_error = error_text
 
                 break  # Normal completion
             except Exception as inner_exc:
@@ -282,20 +337,30 @@ async def run_agent_session(
             print(f"\n[STUCK] {message_text}", flush=True)
             try:
                 await client.interrupt()
+                # The interrupted turn still ends with a ResultMessage: count its cost
+                result_msg = await _receive_result_after_interrupt(client)
             except Exception as interrupt_exc:
                 print(f"   (interrupt failed: {interrupt_exc})", flush=True)
+            if result_msg is not None:
+                _record_session_usage(project_dir, result_msg, usage_context, cost_tracker)
             print("\n" + "-" * 70 + "\n")
             return "error", message_text
 
         if result_msg is not None:
-            _record_session_usage(project_dir, result_msg, usage_context)
+            _record_session_usage(project_dir, result_msg, usage_context, cost_tracker)
 
         print("\n" + "-" * 70 + "\n")
+        if billing_error is not None:
+            return "billing", billing_error
         return "continue", response_text
 
     except Exception as e:
         error_str = str(e)
         print(f"Error during agent session: {error_str}")
+
+        # Billing errors are not retryable: stop instead of burning more credits
+        if billing_error is not None or is_billing_error(error_str):
+            return "billing", billing_error or error_str
 
         # Detect rate limit errors from exception message
         if is_rate_limit_error(error_str):
@@ -320,7 +385,7 @@ async def run_autonomous_agent(
     testing_feature_id: Optional[int] = None,
     testing_feature_ids: Optional[list[int]] = None,
     auto_improve: bool = False,
-) -> None:
+) -> int:
     """
     Run the autonomous agent loop.
 
@@ -337,6 +402,11 @@ async def run_autonomous_agent(
         auto_improve: If True, run in auto-improve mode (agent creates one
             improvement feature, implements it, commits, and exits). Takes
             precedence over other prompt selection branches.
+
+    Returns:
+        Process exit code: 0 normally, BILLING_ERROR_EXIT_CODE when stopped
+        because credits ran out, BUDGET_EXCEEDED_EXIT_CODE when stopped
+        because AUTOFORGE_MAX_BUDGET_USD was reached.
     """
     print("\n" + "=" * 70)
     print("  AUTONOMOUS CODING AGENT")
@@ -357,6 +427,14 @@ async def run_autonomous_agent(
         print(f"Max iterations: {max_iterations}")
     else:
         print("Max iterations: Unlimited (will run until completion)")
+    max_budget_usd = get_max_budget_usd()
+    if max_budget_usd is not None:
+        print(f"Spending cap: ${max_budget_usd:.2f} (estimated, this agent process)")
+    if uses_api_key_billing():
+        print("Billing: ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN is set - usage is billed per token")
+        print("         to that Anthropic API account, not your Claude subscription.")
+        if max_budget_usd is None:
+            print(f"         Set {MAX_BUDGET_ENV_VAR} to cap spend.")
     print()
 
     # Create project directory
@@ -404,6 +482,8 @@ async def run_autonomous_agent(
     iteration = 0
     rate_limit_retries = 0  # Track consecutive rate limit errors for exponential backoff
     error_retries = 0  # Track consecutive non-rate-limit errors
+    total_cost_usd = 0.0  # Estimated spend across sessions in this process
+    exit_code = 0
 
     while True:
         iteration += 1
@@ -427,6 +507,7 @@ async def run_autonomous_agent(
             print("  COST LIMIT REACHED")
             print("=" * 70)
             print(f"\n{format_cost_limit_message(total_cost, cost_limit)}")
+            exit_code = BUDGET_EXCEEDED_EXIT_CODE  # a stop, not a crash (the UI shows "stopped")
             break
 
         # Check max iterations
@@ -465,6 +546,7 @@ async def run_autonomous_agent(
 
         # Run session with async context manager
         # Wrap in try/except to handle MCP server startup failures gracefully
+        session_costs: list[float] = []
         try:
             async with client:
                 session_feature_ids = feature_ids or (
@@ -476,11 +558,38 @@ async def run_autonomous_agent(
                     prompt,
                     project_dir,
                     usage_context={"agent_type": agent_type, "feature_ids": session_feature_ids, "model": model},
+                    cost_tracker=session_costs,
                 )
         except Exception as e:
             print(f"Client/MCP server error: {e}")
             # Don't crash - return error status so the loop can retry
-            status, response = "error", str(e)
+            status, response = ("billing" if is_billing_error(str(e)) else "error"), str(e)
+
+        # Report session cost (from the SDK's ResultMessage; the orchestrator reads the
+        # usage records, never this text)
+        if session_costs:
+            session_cost = sum(session_costs)
+            total_cost_usd += session_cost
+            print(f"Session cost (estimated): ${session_cost:.4f} | this agent total: ${total_cost_usd:.4f}", flush=True)
+
+        # Billing errors (credits exhausted) are fatal: retrying keeps spending
+        if status == "billing":
+            print(f"\nBilling error: {response}", flush=True)
+            print(BILLING_ERROR_HELP, flush=True)
+            exit_code = BILLING_ERROR_EXIT_CODE
+            break
+
+        # Spending cap reached
+        if max_budget_usd is not None and total_cost_usd >= max_budget_usd:
+            print("\n" + "=" * 70, flush=True)
+            print("  SPENDING CAP REACHED - AGENT STOPPED", flush=True)
+            print("=" * 70, flush=True)
+            print(
+                f"Estimated spend ${total_cost_usd:.2f} reached {MAX_BUDGET_ENV_VAR}=${max_budget_usd:.2f}.",
+                flush=True,
+            )
+            exit_code = BUDGET_EXCEEDED_EXIT_CODE
+            break
 
         # Check for project completion - EXIT when all features pass.
         # Use the database as the source of truth rather than scanning the agent's
@@ -630,3 +739,4 @@ async def run_autonomous_agent(
     print("-" * 70)
 
     print("\nDone!")
+    return exit_code

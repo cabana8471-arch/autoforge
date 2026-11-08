@@ -45,6 +45,8 @@ You need one of the following:
 - **Anthropic API Key** (recommended) - Pay-per-use from https://console.anthropic.com/
 - **Claude Pro/Max Subscription** - Use `claude login` to authenticate (see warning above)
 
+> **Cost control:** With an API key, every agent session is billed per token to your Anthropic Console account, and an autonomous run (especially with multiple parallel agents) can spend credits quickly. Anthropic's Console spend limits and credit balance are enforced with a delay, so they can be overshot. Set `AUTOFORGE_MAX_BUDGET_USD` (e.g. in `~/.autoforge/.env`) or pass `--max-budget-usd` to have AutoForge stop all agents once the estimated spend reaches your cap. If `ANTHROPIC_API_KEY` is set, the Claude CLI uses it instead of your subscription login. See [Spending Limits](#spending-limits).
+
 ---
 
 ## Quick Start
@@ -198,6 +200,18 @@ python autonomous_agent_demo.py --project-dir my-app --concurrency 3 --testing-r
 - **Full app:** Building all features typically requires **many hours** of total runtime across multiple sessions.
 
 **Tip:** The feature count in the prompts determines scope. For faster demos, you can modify your app spec to target fewer features (e.g., 20-50 features for a quick demo).
+
+---
+
+## Spending Limits
+
+AutoForge runs unattended, so it has its own spend safeguards in addition to your Anthropic Console limits:
+
+- **Billing errors stop the run.** When the API reports an exhausted credit balance (e.g. `Credit balance is too low`), the agent stops instead of retrying, and the orchestrator stops all other agents.
+- **Optional spending cap.** Set `AUTOFORGE_MAX_BUDGET_USD=20` in `~/.autoforge/.env` (or `.env` when running from source), or pass `--max-budget-usd 20` to `autonomous_agent_demo.py`. After each session, agents record the estimated cost given by the Claude Agent SDK in the project's database. Once this run's total across all agents reaches the cap, the orchestrator stops every agent. The project-wide cost limit in Settings works the same way, across runs. The check happens when a session ends, so expect to overshoot by up to one session's cost per running agent.
+- **Visibility.** Each session prints `Session cost (estimated): $X`, the Dashboard's Usage card shows the project's spend, and a run stopped for spend shows as *stopped* with the reason in the log.
+
+Costs are estimates calculated by the Claude CLI. Check the Anthropic Console for actual billing.
 
 ---
 
@@ -493,6 +507,9 @@ Install the Claude Code CLI using the instructions in the Prerequisites section.
 
 **"Not authenticated with Claude"**
 Set your API key via `ANTHROPIC_API_KEY` environment variable or the Settings UI. Alternatively, run `claude login` to use subscription credentials, but note that Anthropic's policy may not permit subscription-based auth for third-party agents.
+
+**"Credit balance is too low" / unexpected API charges**
+Your Anthropic API account ran out of credits. AutoForge stops all agents when this happens. If `ANTHROPIC_API_KEY` is set, the Claude CLI bills that account even when you're logged in with a subscription. Set `AUTOFORGE_MAX_BUDGET_USD` to cap spend (see [Spending Limits](#spending-limits)).
 
 **"Appears to hang on first run"**
 This is normal. The initializer agent is generating detailed test cases, which takes significant time. Watch for `[Tool: ...]` output to confirm the agent is working.

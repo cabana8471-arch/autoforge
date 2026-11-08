@@ -57,6 +57,9 @@ class FakeClient:
         pass
 
     async def receive_response(self):
+        if self.interrupted:
+            # Like the CLI after an interrupt: the turn ends (no ResultMessage scripted here)
+            return
         for msg in self.messages:
             self.consumed += 1
             yield msg

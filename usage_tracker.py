@@ -20,6 +20,7 @@ estimate, but token counts remain accurate.
 """
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +168,34 @@ def get_usage_totals(project_dir: Path, strict: bool = False) -> dict[str, Any]:
         cost_usd=float(row[5]),
     )
     return totals
+
+
+def get_usage_cost_since(project_dir: Path, since: datetime, strict: bool = False) -> float:
+    """Total cost of the usage records created at or after ``since`` (one run's spend).
+
+    A read error returns 0.0 with a warning, or raises CostCheckError with ``strict``.
+    """
+    if not get_features_db_path(project_dir).exists():
+        return 0.0
+    try:
+        _, SessionLocal = create_database(project_dir)
+        session = SessionLocal()
+        try:
+            total = (
+                session.query(func.coalesce(func.sum(AgentUsage.cost_usd), 0.0))
+                .filter(AgentUsage.created_at >= since)
+                .scalar()
+            )
+        finally:
+            session.close()
+    except UnsafeProjectPathError:
+        raise
+    except Exception as e:
+        if strict:
+            raise CostCheckError(f"Could not read this run's spend: {e}") from e
+        logger.warning("Failed to read run usage for %s: %s", project_dir, e)
+        return 0.0
+    return float(total or 0.0)
 
 
 def get_recent_sessions(project_dir: Path, limit: int = RECENT_SESSIONS_LIMIT) -> list[dict[str, Any]]:
