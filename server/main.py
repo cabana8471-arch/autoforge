@@ -37,8 +37,10 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+
+from api.safe_project_io import UnsafeProjectPathError
 
 from .routers import (
     agent_router,
@@ -184,6 +186,15 @@ if not ALLOW_REMOTE:
             raise HTTPException(status_code=403, detail="Localhost access only")
 
         return await call_next(request)
+
+
+async def _unsafe_project_path_handler(request: Request, exc: Exception) -> JSONResponse:
+    """A path refused because of a link planted in the project: 409 with the reason, not a generic 500."""
+    logger.warning("Refused project path on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+app.add_exception_handler(UnsafeProjectPathError, _unsafe_project_path_handler)
 
 
 # ============================================================================

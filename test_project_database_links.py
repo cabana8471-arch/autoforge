@@ -163,8 +163,9 @@ def test_progress_queries_refuse_linked_database(project: Path, outside: Path, c
 
     with pytest.raises(sio.UnsafeProjectPathError):
         progress.has_features(project)
-    assert progress.count_passing_tests(project) == (0, 0, 0, 0)
-    assert progress.clear_stuck_features(project) == 0
+    with pytest.raises(sio.UnsafeProjectPathError):  # a clear error, never a false 0/0
+        progress.count_passing_tests(project)
+    assert progress.clear_stuck_features(project) == 0  # startup recovery: warning only
 
     assert _in_progress(db) == 1
     assert "Refusing to open the project database" in capsys.readouterr().out

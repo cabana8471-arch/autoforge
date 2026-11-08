@@ -149,6 +149,8 @@ def count_passing_tests(project_dir: Path) -> tuple[int, int, int, int]:
                     in_progress = 0
                     needs_human_input = 0
             return passing, in_progress, total, needs_human_input
+    except UnsafeProjectPathError:
+        raise  # a clear error, not a false 0/0
     except Exception as e:
         print(f"[Database error in count_passing_tests: {e}]")
         return 0, 0, 0, 0

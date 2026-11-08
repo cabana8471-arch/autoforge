@@ -13,6 +13,8 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
+from api.safe_project_io import UnsafeProjectPathError
+
 from ..schemas import (
     DependencyGraphEdge,
     DependencyGraphNode,
@@ -177,7 +179,7 @@ async def list_features(project_name: str):
                 needs_human_input=needs_human_input_list,
                 needs_manual_testing=needs_manual_testing_list,
             )
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Database error in list_features")
@@ -224,7 +226,7 @@ async def create_feature(project_name: str, feature: FeatureCreate):
             session.refresh(db_feature)
 
             return feature_to_response(db_feature)
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to create feature")
@@ -318,7 +320,7 @@ async def create_features_bulk(project_name: str, bulk: FeatureBulkCreate):
                 created=len(created_features),
                 features=created_features
             )
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to bulk create features")
@@ -389,7 +391,7 @@ async def get_dependency_graph(project_name: str):
                     edges.append(DependencyGraphEdge(source=dep_id, target=f.id))
 
             return DependencyGraphResponse(nodes=nodes, edges=edges)
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to get dependency graph")
@@ -428,7 +430,7 @@ async def get_feature(project_name: str, feature_id: int):
                 raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found")
 
             return feature_to_response(feature)
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Database error in get_feature")
@@ -466,7 +468,7 @@ async def get_evidence_screenshot(project_name: str, feature_id: int, index: int
             if not feature:
                 raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found")
             evidence = feature.test_evidence if isinstance(feature.test_evidence, dict) else {}
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Database error in get_evidence_screenshot")
@@ -544,7 +546,7 @@ async def update_feature(project_name: str, feature_id: int, update: FeatureUpda
             passing_ids = {f.id for f in all_features if f.passes}
 
             return feature_to_response(feature, passing_ids)
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to update feature")
@@ -595,7 +597,7 @@ async def delete_feature(project_name: str, feature_id: int):
                 message += f". Removed from dependencies of features: {affected_features}"
 
             return {"success": True, "message": message, "affected_features": affected_features}
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to delete feature")
@@ -635,7 +637,7 @@ async def skip_feature(project_name: str, feature_id: int):
             session.commit()
 
             return {"success": True, "message": f"Feature {feature_id} moved to end of queue"}
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to skip feature")
@@ -700,7 +702,7 @@ async def resolve_human_input(project_name: str, feature_id: int, response: Huma
             passing_ids = {f.id for f in all_features if f.passes}
 
             return feature_to_response(feature, passing_ids)
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to resolve human input")
@@ -764,7 +766,7 @@ async def submit_manual_test(project_name: str, feature_id: int, verdict: Manual
 
             all_features = session.query(Feature).all()
             return feature_to_response(feature, {f.id for f in all_features if f.passes})
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to record manual test result")
@@ -840,7 +842,7 @@ async def add_dependency(project_name: str, feature_id: int, dep_id: int):
             session.commit()
 
             return {"success": True, "feature_id": feature_id, "dependencies": feature.dependencies}
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to add dependency")
@@ -876,7 +878,7 @@ async def remove_dependency(project_name: str, feature_id: int, dep_id: int):
             session.commit()
 
             return {"success": True, "feature_id": feature_id, "dependencies": feature.dependencies or []}
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to remove dependency")
@@ -946,7 +948,7 @@ async def set_dependencies(project_name: str, feature_id: int, update: Dependenc
             session.commit()
 
             return {"success": True, "feature_id": feature_id, "dependencies": feature.dependencies or []}
-    except HTTPException:
+    except (HTTPException, UnsafeProjectPathError):  # a refused path keeps its own 409
         raise
     except Exception:
         logger.exception("Failed to set dependencies")
