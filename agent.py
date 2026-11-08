@@ -10,7 +10,7 @@ import io
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from claude_agent_sdk import (
     ClaudeSDKClient,
@@ -51,6 +51,12 @@ from rate_limit_utils import (
     is_rate_limit_error,
     parse_limit_reset,
     parse_retry_after,
+)
+from usage_tracker import (
+    check_cost_limit,
+    extract_usage,
+    format_cost_limit_message,
+    record_usage,
 )
 
 # Configuration
@@ -116,6 +122,19 @@ def _print_result_message(msg: ResultMessage) -> str:
     return error_text
 
 
+def _record_session_usage(
+    project_dir: Path, result_msg: ResultMessage, usage_context: Optional[dict[str, Any]]
+) -> None:
+    """Store the session's token usage and cost (the cost is already in the [Result] line)."""
+    usage = extract_usage(result_msg)
+    record_usage(project_dir, usage, **(usage_context or {}))
+    print(
+        f"[Usage] {usage['input_tokens']:,} in / {usage['output_tokens']:,} out tokens "
+        f"(cache: {usage['cache_read_tokens']:,} read, {usage['cache_creation_tokens']:,} written)",
+        flush=True,
+    )
+
+
 def _print_limit_warning(response: str, delay_seconds: int, reset_at: Optional[datetime]) -> None:
     """Print a prominent warning that Claude's rate/usage limit was reached."""
     # Show the line Claude actually sent (e.g. "Limit reached · resets 6pm (...)")
@@ -140,6 +159,7 @@ async def run_agent_session(
     client: ClaudeSDKClient,
     message: str,
     project_dir: Path,
+    usage_context: Optional[dict[str, Any]] = None,
 ) -> tuple[str, str]:
     """
     Run a single agent session using Claude Agent SDK.
@@ -148,6 +168,8 @@ async def run_agent_session(
         client: Claude SDK client
         message: The prompt to send
         project_dir: Project directory path
+        usage_context: Extra fields (agent_type, feature_ids, model) stored with
+            the session's token/cost usage record
 
     Returns:
         (status, response_text) where status is:
@@ -166,6 +188,7 @@ async def run_agent_session(
         # generator.  The subprocess is still alive so we restart to read remaining
         # messages from the buffered channel.
         response_text = ""
+        result_msg: Any = None
         max_parse_retries = 50
         parse_retries = 0
         # Track Write/Edit calls so repeated stale-read errors can be detected
@@ -229,8 +252,9 @@ async def run_agent_session(
                     elif isinstance(msg, SystemMessage):
                         _print_system_message(msg)
 
-                    # Handle ResultMessage (end of turn: errors, turn count, cost)
+                    # Handle ResultMessage (end of turn: errors, turn count, cost, token usage)
                     elif isinstance(msg, ResultMessage):
+                        result_msg = msg
                         error_text = _print_result_message(msg)
                         if error_text:
                             # Surface errors in the response so rate-limit
@@ -262,6 +286,9 @@ async def run_agent_session(
                 print(f"   (interrupt failed: {interrupt_exc})", flush=True)
             print("\n" + "-" * 70 + "\n")
             return "error", message_text
+
+        if result_msg is not None:
+            _record_session_usage(project_dir, result_msg, usage_context)
 
         print("\n" + "-" * 70 + "\n")
         return "continue", response_text
@@ -393,6 +420,15 @@ async def run_autonomous_agent(
                 print(f"\nAll {total} features are passing. Nothing left to do.")
                 break
 
+        # Check cost limit (global max_cost_usd setting vs. project's cumulative spend)
+        limit_reached, total_cost, cost_limit = check_cost_limit(project_dir)
+        if limit_reached and cost_limit is not None:
+            print("\n" + "=" * 70)
+            print("  COST LIMIT REACHED")
+            print("=" * 70)
+            print(f"\n{format_cost_limit_message(total_cost, cost_limit)}")
+            break
+
         # Check max iterations
         if max_iterations and iteration > max_iterations:
             print(f"\nReached max iterations ({max_iterations})")
@@ -431,7 +467,16 @@ async def run_autonomous_agent(
         # Wrap in try/except to handle MCP server startup failures gracefully
         try:
             async with client:
-                status, response = await run_agent_session(client, prompt, project_dir)
+                session_feature_ids = feature_ids or (
+                    [feature_id] if feature_id is not None
+                    else testing_feature_ids or ([testing_feature_id] if testing_feature_id is not None else None)
+                )
+                status, response = await run_agent_session(
+                    client,
+                    prompt,
+                    project_dir,
+                    usage_context={"agent_type": agent_type, "feature_ids": session_feature_ids, "model": model},
+                )
         except Exception as e:
             print(f"Client/MCP server error: {e}")
             # Don't crash - return error status so the loop can retry

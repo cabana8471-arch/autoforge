@@ -40,6 +40,7 @@
     "rate_limit_utils.py",
     "security.py",
     "temp_cleanup.py",
+    "usage_tracker.py",
     "app_spec_parser.py",
     "auto_documentation.py",
     "design_tokens.py",

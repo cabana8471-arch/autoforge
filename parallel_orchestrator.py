@@ -45,6 +45,7 @@ from api.safe_project_io import unlink_project_file
 from progress import has_features
 from rate_limit_utils import MAX_LIMIT_RESET_SECONDS, calculate_rate_limit_backoff, parse_rate_limit_marker
 from server.utils.process_utils import kill_process_tree
+from usage_tracker import check_cost_limit, format_cost_limit_message
 
 logger = logging.getLogger(__name__)
 
@@ -1702,6 +1703,15 @@ class ParallelOrchestrator:
                 # Check if all complete
                 if self.get_all_complete(feature_dicts):
                     print(f"\n{self.completion_message(feature_dicts)}", flush=True)
+                    break
+
+                # Stop spawning agents once the project's spend reaches the cost limit.
+                # Running agents finish their current session (see wait loop below).
+                limit_reached, total_cost, cost_limit = check_cost_limit(self.project_dir)
+                if limit_reached and cost_limit is not None:
+                    print(f"\n{format_cost_limit_message(total_cost, cost_limit)}", flush=True)
+                    debug_log.log("COST", "Cost limit reached, stopping orchestrator",
+                        total_cost_usd=round(total_cost, 4), limit_usd=cost_limit)
                     break
 
                 # --- Graceful pause (drain mode) ---
