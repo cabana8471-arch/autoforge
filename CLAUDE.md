@@ -134,6 +134,7 @@ python -m pytest test_manual_testing.py       # Manual Testing lane: state, bloc
 python -m pytest test_feature_update.py        # Editing features, incl. reopening completed ones
 python -m pytest test_testing_model.py         # Separate model for testing agents (CLI, settings, UI start)
 python -m pytest test_feature_report_bug.py    # Assistant bug reports reopen the existing feature
+python -m pytest test_spec_conversation_summary.py  # Spec chat transcript (spec_input_summary.md)
 ```
 
 ### React UI
@@ -318,6 +319,7 @@ Keyboard shortcuts (press `?` for help):
 
 Projects can be stored in any directory (registered in `~/.autoforge/registry.db`). Each project contains:
 - `.autoforge/prompts/app_spec.txt` - Application specification (XML format)
+- `.autoforge/prompts/spec_input_summary.md` - Markdown transcript of the spec creation chat (questions, options, answers), written by `spec_chat_session.py` after every exchange
 - `.autoforge/prompts/initializer_prompt.md` - First session prompt
 - `.autoforge/prompts/coding_prompt.md` - Continuation session prompt
 - `.autoforge/features.db` - SQLite database with feature test cases

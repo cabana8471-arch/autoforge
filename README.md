@@ -252,6 +252,7 @@ my_project/                   # Project folder = your application's source tree
 ├── .autoforge/               # AutoForge's files (not part of your app)
 │   ├── prompts/
 │   │   ├── app_spec.txt      # Your app specification
+│   │   ├── spec_input_summary.md # Transcript of the spec creation chat (Web UI)
 │   │   ├── initializer_prompt.md # First session prompt
 │   │   ├── coding_prompt.md  # Continuation session prompt
 │   │   └── testing_prompt.md # Regression testing prompt
