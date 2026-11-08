@@ -300,3 +300,84 @@ def test_delete_helpers_path_fallback(root, outside, monkeypatch):
     sio.unlink_project_file(root, root / "real" / "x.txt")
     sio.remove_project_tree(root, root / "real")
     assert not (root / "real").exists()
+
+
+@pytest.mark.parametrize("dir_fd", [True, False])
+def test_open_project_file_for_write_streams_and_keeps_target_on_error(root, outside, monkeypatch, dir_fd):
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", dir_fd)
+    target = root / "exports" / "log.jsonl"
+    with sio.open_project_file_for_write(root, target) as f:
+        f.write(b"one\n")
+        f.write(b"two\n")
+    assert target.read_bytes() == b"one\ntwo\n"
+
+    with pytest.raises(RuntimeError):
+        with sio.open_project_file_for_write(root, target) as f:
+            f.write(b"partial")
+            raise RuntimeError("export failed")
+    assert target.read_bytes() == b"one\ntwo\n"
+    assert [p.name for p in target.parent.iterdir()] == ["log.jsonl"]
+
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        with sio.open_project_file_for_write(root, root / "linked" / "x"):
+            pass
+    assert list(outside.iterdir()) == []
+
+
+def _make_tree(base, outside):
+    (base / "sub").mkdir(parents=True)
+    (base / "sub" / "a.txt").write_bytes(b"a")
+    (base / "run.sh").write_bytes(b"#!/bin/sh\n")
+    os.chmod(base / "run.sh", 0o755)
+    os.utime(base / "run.sh", (1_000_000, 1_000_000))
+    (base / "link").symlink_to(outside / "id_rsa")
+
+
+@pytest.mark.parametrize("dir_fd", [True, False])
+def test_copy_project_entry_copies_like_copytree_symlinks(root, outside, monkeypatch, dir_fd):
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", dir_fd)
+    (outside / "id_rsa").write_bytes(b"secret")
+    _make_tree(root / ".autoforge", outside)
+
+    sio.copy_project_entry(root, root / ".autoforge", root / "backup" / ".autoforge")
+    sio.copy_project_entry(root, root / ".autoforge" / "link", root / "backup" / "link")
+    sio.copy_project_entry(root, root / ".autoforge" / "run.sh", root / "backup" / "run.sh")
+
+    copy = root / "backup" / ".autoforge"
+    assert (copy / "sub" / "a.txt").read_bytes() == b"a"
+    assert (copy / "link").is_symlink() and os.readlink(copy / "link") == str(outside / "id_rsa")
+    assert (root / "backup" / "link").is_symlink()
+    assert os.stat(root / "backup" / "run.sh").st_mode & 0o777 == 0o755
+    assert int(os.stat(root / "backup" / "run.sh").st_mtime) == 1_000_000
+    assert [p.name for p in (root / "backup").iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_copy_project_entry_replaces_existing_target(root):
+    (root / "src").mkdir()
+    (root / "src" / "new.txt").write_bytes(b"new")
+    (root / "dst").mkdir()
+    (root / "dst" / "old.txt").write_bytes(b"old")
+    (root / "file.txt").write_bytes(b"file")
+
+    sio.copy_project_entry(root, root / "src", root / "dst")
+    sio.copy_project_entry(root, root / "file.txt", root / "src")  # file over a directory
+
+    assert [p.name for p in (root / "dst").iterdir()] == ["new.txt"]
+    assert (root / "src").read_bytes() == b"file"
+
+
+@pytest.mark.parametrize("dir_fd", [True, False])
+def test_copy_project_entry_refuses_symlinked_parents(root, outside, monkeypatch, dir_fd):
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", dir_fd)
+    (outside / "id_rsa").write_bytes(b"secret")
+    (root / "backup").symlink_to(outside, target_is_directory=True)
+    (root / "real.txt").write_bytes(b"x")
+
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.copy_project_entry(root, root / "backup" / "id_rsa", root / "stolen.txt")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.copy_project_entry(root, root / "real.txt", root / "backup" / "real.txt")
+
+    assert not (root / "stolen.txt").exists()
+    assert {p.name for p in outside.iterdir()} == {"id_rsa"}

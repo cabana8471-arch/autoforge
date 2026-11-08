@@ -276,12 +276,13 @@ async def export_logs(request: ExportRequest):
 
         # Export to project's .autocoder/exports directory
         export_dir = project_dir / ".autocoder" / "exports"
-        export_dir.mkdir(parents=True, exist_ok=True)
         output_path = export_dir / filename
 
         count = query.export_logs(
             output_path=output_path,
-            format=request.format,
+            output_format=request.format,
+            # Creates the exports directory; never writes through a planted link
+            project_dir=project_dir,
             level=request.level,
             agent_id=request.agent_id,
             feature_id=request.feature_id,

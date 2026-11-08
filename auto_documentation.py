@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from api.safe_project_io import write_project_file
 from autoforge_paths import get_prompts_dir
 
 logger = logging.getLogger(__name__)
@@ -562,7 +563,7 @@ class DocumentationGenerator:
         lines.append("---\n")
         lines.append(f"*Generated on {docs.generated_at[:10]} by Autocoder*\n")
 
-        readme_path.write_text("\n".join(lines))
+        write_project_file(self.project_dir, readme_path, "\n".join(lines).encode("utf-8"))
         return readme_path
 
     def write_api_docs(self, docs: ProjectDocs) -> Optional[Path]:
@@ -578,7 +579,6 @@ class DocumentationGenerator:
         if not docs.api_endpoints:
             return None
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
         api_docs_path = self.output_dir / "API.md"
 
         lines = []
@@ -612,7 +612,7 @@ class DocumentationGenerator:
         lines.append("---\n")
         lines.append(f"*Generated on {docs.generated_at[:10]} by Autocoder*\n")
 
-        api_docs_path.write_text("\n".join(lines))
+        write_project_file(self.project_dir, api_docs_path, "\n".join(lines).encode("utf-8"))
         return api_docs_path
 
     def write_setup_guide(self, docs: ProjectDocs) -> Path:
@@ -625,7 +625,6 @@ class DocumentationGenerator:
         Returns:
             Path to written file
         """
-        self.output_dir.mkdir(parents=True, exist_ok=True)
         setup_path = self.output_dir / "SETUP.md"
 
         lines = []
@@ -679,7 +678,7 @@ class DocumentationGenerator:
         lines.append("---\n")
         lines.append(f"*Generated on {docs.generated_at[:10]} by Autocoder*\n")
 
-        setup_path.write_text("\n".join(lines))
+        write_project_file(self.project_dir, setup_path, "\n".join(lines).encode("utf-8"))
         return setup_path
 
     def generate_all(self) -> dict:

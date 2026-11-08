@@ -27,8 +27,10 @@ import os
 import shutil
 import stat
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,9 @@ DIR_FD_SUPPORTED = (
     and os.mkdir in os.supports_dir_fd
     and os.unlink in os.supports_dir_fd
     and os.rename in os.supports_dir_fd
+    and os.stat in os.supports_dir_fd
+    and os.symlink in os.supports_dir_fd
+    and os.readlink in os.supports_dir_fd
 )
 
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -212,20 +217,47 @@ def write_project_file(project_dir: Path, target: Path, data: bytes) -> None:
         UnsafeProjectPathError: the target is outside the project or a parent is a symlink
         OSError: the write failed
     """
+    with open_project_file_for_write(project_dir, target) as f:
+        f.write(data)
+
+
+@contextmanager
+def open_project_file_for_write(project_dir: Path, target: Path) -> Iterator[BinaryIO]:
+    """Stream a new version of ``target`` (below ``project_dir``); like ``write_project_file``.
+
+    Yields a binary file on a fresh temp file next to the target, renamed over the
+    target when the block completes; on an exception the temp file is removed and
+    the target is left as it was.
+
+    Raises:
+        UnsafeProjectPathError: the target is outside the project or a parent is a symlink
+        OSError: the write failed
+    """
     relative = _project_relative(project_dir, target)
+    tmp_name = f".{relative.name}.{uuid.uuid4().hex}.tmp"
     if DIR_FD_SUPPORTED:
         dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=True)
         try:
-            _replace_file(dir_fd, relative.name, data)
+            fd = os.open(tmp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dir_fd)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    yield f
+                os.rename(tmp_name, relative.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+            except BaseException:
+                try:
+                    os.unlink(tmp_name, dir_fd=dir_fd)
+                except OSError:
+                    pass
+                raise
         finally:
             os.close(dir_fd)
         return
     path = _refuse_symlinks(project_dir, relative)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    tmp = path.with_name(tmp_name)
     try:
         with open(tmp, "xb") as f:
-            f.write(data)
+            yield f
         os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
@@ -389,3 +421,121 @@ def remove_project_tree(project_dir: Path, target: Path) -> None:
             os.close(dir_fd)
         return
     shutil.rmtree(_refuse_symlinks(project_dir, relative))
+
+
+def _remove_entry_at(dir_fd: int, name: str) -> None:
+    """Remove ``name`` in ``dir_fd`` if present: a directory tree, or a file or symlink."""
+    try:
+        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(st.st_mode):
+        shutil.rmtree(name, dir_fd=dir_fd)
+    else:
+        os.unlink(name, dir_fd=dir_fd)
+
+
+def _copy_entry_at(src_dir: int, name: str, dst_dir: int, dst_name: str) -> None:
+    """Copy ``name`` (symlink, regular file or directory tree) to a new ``dst_name``, like copytree(symlinks=True)."""
+    st = os.stat(name, dir_fd=src_dir, follow_symlinks=False)
+    if stat.S_ISLNK(st.st_mode):
+        os.symlink(os.readlink(name, dir_fd=src_dir), dst_name, dir_fd=dst_dir)
+    elif stat.S_ISDIR(st.st_mode):
+        os.mkdir(dst_name, 0o700, dir_fd=dst_dir)
+        src_fd = os.open(name, _DIR_FLAGS, dir_fd=src_dir)
+        try:
+            dst_fd = os.open(dst_name, _DIR_FLAGS, dir_fd=dst_dir)
+            try:
+                for child in sorted(os.listdir(src_fd)):
+                    _copy_entry_at(src_fd, child, dst_fd, child)
+            finally:
+                os.close(dst_fd)
+        finally:
+            os.close(src_fd)
+        os.chmod(dst_name, stat.S_IMODE(st.st_mode), dir_fd=dst_dir)
+    elif stat.S_ISREG(st.st_mode):
+        src_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=src_dir)
+        try:
+            if not stat.S_ISREG(os.fstat(src_fd).st_mode):  # swapped since the lstat
+                raise UnsafeProjectPathError(f"{name!r} is not a regular file")
+            dst_fd = os.open(dst_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dst_dir)
+            with os.fdopen(dst_fd, "wb") as dst, os.fdopen(os.dup(src_fd), "rb") as src:
+                shutil.copyfileobj(src, dst)
+                dst.flush()
+                # Same metadata as shutil.copy2: permission bits and timestamps
+                os.fchmod(dst.fileno(), stat.S_IMODE(st.st_mode))
+                os.utime(dst.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
+        finally:
+            os.close(src_fd)
+    else:
+        raise UnsafeProjectPathError(f"{name!r} is not a regular file, directory or symlink")
+
+
+def copy_project_entry(project_dir: Path, source: Path, target: Path) -> None:
+    """Replace ``target`` with a copy of ``source``; both are paths below ``project_dir``.
+
+    Copies a file, a symlink (as a symlink) or a directory tree (links inside it
+    as links), like ``shutil.copytree(..., symlinks=True)`` / ``shutil.copy2``,
+    but without following a symlinked parent on either side. The copy is built
+    under a temporary name next to ``target`` and renamed over it once complete;
+    an existing ``target`` (file, symlink or tree) is removed just before.
+
+    Raises:
+        UnsafeProjectPathError: either path is outside the project or has a symlinked parent
+        OSError: ``source`` is missing or the copy failed
+    """
+    src_rel = _project_relative(project_dir, source)
+    dst_rel = _project_relative(project_dir, target)
+    tmp_name = f".{dst_rel.name}.{uuid.uuid4().hex}.tmp"
+    if not DIR_FD_SUPPORTED:
+        src_path = _refuse_symlinks(project_dir, src_rel.parent) / src_rel.name
+        dst_path = _refuse_symlinks(project_dir, dst_rel)
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = dst_path.with_name(tmp_name)
+        try:
+            if src_path.is_symlink():
+                tmp_path.symlink_to(os.readlink(src_path))
+            elif src_path.is_dir():
+                shutil.copytree(src_path, tmp_path, symlinks=True)
+            else:
+                shutil.copy2(src_path, tmp_path)
+            if dst_path.is_dir() and not dst_path.is_symlink():
+                shutil.rmtree(dst_path)
+            elif tmp_path.is_dir() and not tmp_path.is_symlink():
+                dst_path.unlink(missing_ok=True)
+            os.replace(tmp_path, dst_path)
+        except BaseException:
+            if tmp_path.is_dir() and not tmp_path.is_symlink():
+                shutil.rmtree(tmp_path, ignore_errors=True)
+            else:
+                tmp_path.unlink(missing_ok=True)
+            raise
+        return
+
+    root = project_dir.resolve()
+    src_dir = _walk_dirs(root, src_rel.parts[:-1], create=False)
+    try:
+        dst_dir = _walk_dirs(root, dst_rel.parts[:-1], create=True)
+        try:
+            try:
+                _copy_entry_at(src_dir, src_rel.name, dst_dir, tmp_name)
+                copied_dir = stat.S_ISDIR(os.stat(tmp_name, dir_fd=dst_dir, follow_symlinks=False).st_mode)
+                if copied_dir or _is_dir_at(dst_dir, dst_rel.name):
+                    # rename() only replaces a file with a file: clear the old entry first
+                    _remove_entry_at(dst_dir, dst_rel.name)
+                os.rename(tmp_name, dst_rel.name, src_dir_fd=dst_dir, dst_dir_fd=dst_dir)
+            except BaseException:
+                _remove_entry_at(dst_dir, tmp_name)
+                raise
+        finally:
+            os.close(dst_dir)
+    finally:
+        os.close(src_dir)
+
+
+def _is_dir_at(dir_fd: int, name: str) -> bool:
+    """True when ``name`` in ``dir_fd`` is a real directory (not a symlink to one)."""
+    try:
+        return stat.S_ISDIR(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
+    except FileNotFoundError:
+        return False

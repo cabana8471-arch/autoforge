@@ -17,15 +17,27 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import sys
-import tempfile
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
+from api.safe_project_io import (
+    append_project_file,
+    copy_project_entry,
+    make_project_dirs,
+    read_project_file,
+    remove_project_tree,
+    unlink_project_file,
+    write_project_file,
+)
 from registry import get_project_path, list_registered_projects
+
+# Detach and reattach run outside the agent's sandbox and move whole trees around
+# inside the project: every copy, write and delete goes through api.safe_project_io,
+# so a symlink planted in the project (or in a backup folder) is copied as a link
+# and never followed to read, write or delete outside the project.
 
 # Module logger
 logger = logging.getLogger(__name__)
@@ -438,45 +450,35 @@ def create_backup(
     if dry_run:
         return manifest
 
-    # Create backup directory
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    # Create backup directory (refused when the agent turned it into a symlink)
+    make_project_dirs(project_dir, backup_dir)
     phase = 1  # Track phase: 1=Copy, 2=Manifest, 3=Delete originals
 
     try:
-        # Phase 1: Copy files to backup (preserves originals on failure)
+        # Phase 1: Copy files to backup (preserves originals on failure).
+        # Symlinks are copied as symlinks, also inside directories.
         for file_path in files:
             relative_path = file_path.relative_to(project_dir)
-            dest_path = backup_dir / relative_path
-
-            # Ensure parent directory exists
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Copy file/directory (handle symlinks explicitly)
-            if file_path.is_symlink():
-                # Preserve symlinks as symlinks
-                link_target = os.readlink(file_path)
-                dest_path.symlink_to(link_target)
-            elif file_path.is_dir():
-                shutil.copytree(file_path, dest_path, symlinks=True)
-            else:
-                shutil.copy2(file_path, dest_path)
-
+            copy_project_entry(project_dir, file_path, backup_dir / relative_path)
             logger.debug("Copied %s to backup", relative_path)
 
         # Phase 2: Write manifest (before deleting originals)
         phase = 2
         manifest_path = backup_dir / MANIFEST_FILE
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
+        write_project_file(project_dir, manifest_path, json.dumps(manifest, indent=2).encode("utf-8"))
 
         # Phase 3: Delete originals (only after successful copy + manifest)
         phase = 3
         logger.debug("Phase 3: Deleting %d original files", len(files))
+        # Pattern matches inside a listed directory go away with that directory
+        listed = set(files)
         for file_path in files:
+            if any(parent in listed for parent in file_path.parents):
+                continue
             if file_path.is_dir() and not file_path.is_symlink():
-                shutil.rmtree(file_path)
+                remove_project_tree(project_dir, file_path)
             else:
-                file_path.unlink()
+                unlink_project_file(project_dir, file_path)
             logger.debug("Removed original: %s", file_path.relative_to(project_dir))
 
     except Exception as e:
@@ -485,7 +487,7 @@ def create_backup(
         if phase < 3:
             logger.error("Backup failed in phase %d: %s - cleaning up partial backup", phase, e)
             if backup_dir.exists():
-                shutil.rmtree(backup_dir)
+                remove_project_tree(project_dir, backup_dir)
         else:
             logger.error("Delete originals failed in phase 3: %s - backup preserved for recovery", e)
         raise
@@ -515,11 +517,10 @@ def restore_backup(project_dir: Path, verify_checksums: bool = False) -> tuple[b
         logger.error("No backup manifest found")
         return False, 0, []
 
-    # Read manifest
+    # Read manifest (it decides what is copied into the project: never through a link)
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            manifest: Manifest = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
+        manifest: Manifest = json.loads(read_project_file(project_dir, manifest_path).decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         logger.error("Failed to read manifest: %s", e)
         return False, 0, []
 
@@ -561,80 +562,17 @@ def restore_backup(project_dir: Path, verify_checksums: bool = False) -> tuple[b
             logger.error("Path traversal detected: %s", entry["path"])
             return False, 0, []
 
-        if not src_path.exists():
+        # lexists: a symlink in the backup counts even when its target is gone
+        if not os.path.lexists(src_path):
             logger.warning("Backup file missing: %s", entry["path"])
             continue
 
-        # Ensure parent directory exists
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Atomic copy-then-replace: copy to temp, then atomically replace destination
-        temp_path: Path | None = None
+        # Copy-then-replace (built under a temp name, renamed over dest_path);
+        # links in the backup are restored as links, never followed
         try:
-            if src_path.is_symlink():
-                # Symlinks can be created atomically - remove existing first
-                if dest_path.exists() or dest_path.is_symlink():
-                    if dest_path.is_dir() and not dest_path.is_symlink():
-                        shutil.rmtree(dest_path)
-                    else:
-                        dest_path.unlink()
-                link_target = os.readlink(src_path)
-                dest_path.symlink_to(link_target)
-            elif src_path.is_dir():
-                # Directories: copy to temp location, then replace
-                temp_fd, temp_path_str = tempfile.mkstemp(
-                    dir=dest_path.parent,
-                    prefix=f".{dest_path.name}.",
-                    suffix=".tmp"
-                )
-                temp_path = Path(temp_path_str)
-                os.close(temp_fd)
-                # mkstemp creates a file, but we need a directory
-                temp_path.unlink()
-                shutil.copytree(src_path, temp_path, symlinks=True)
-
-                # Remove existing destination if needed
-                if dest_path.exists():
-                    if dest_path.is_dir() and not dest_path.is_symlink():
-                        shutil.rmtree(dest_path)
-                    else:
-                        dest_path.unlink()
-
-                os.replace(temp_path, dest_path)
-                temp_path = None  # Successfully moved, no cleanup needed
-            else:
-                # Files: copy to temp location, then atomically replace
-                temp_fd, temp_path_str = tempfile.mkstemp(
-                    dir=dest_path.parent,
-                    prefix=f".{dest_path.name}.",
-                    suffix=".tmp"
-                )
-                temp_path = Path(temp_path_str)
-                os.close(temp_fd)
-                shutil.copy2(src_path, temp_path)
-
-                # Remove existing destination if needed (handles dir where file should be)
-                if dest_path.exists():
-                    if dest_path.is_dir() and not dest_path.is_symlink():
-                        shutil.rmtree(dest_path)
-                    else:
-                        dest_path.unlink()
-
-                # Atomic replace
-                os.replace(temp_path, dest_path)
-                temp_path = None  # Successfully moved, no cleanup needed
-
+            copy_project_entry(project_dir, src_path, dest_path)
         except OSError as e:
             logger.error("Failed to restore %s: %s", entry["path"], e)
-            # Clean up temp file/directory on failure
-            if temp_path and temp_path.exists():
-                try:
-                    if temp_path.is_dir():
-                        shutil.rmtree(temp_path)
-                    else:
-                        temp_path.unlink()
-                except OSError:
-                    pass
             return False, files_restored, conflicts
 
         # Verify checksum if requested and available
@@ -660,13 +598,13 @@ def restore_backup(project_dir: Path, verify_checksums: bool = False) -> tuple[b
     restored_count = len(restored_entries)
 
     if restored_count == expected_count:
-        shutil.rmtree(backup_dir)
+        remove_project_tree(project_dir, backup_dir)
         logger.info("Backup directory removed after successful restore")
         return True, files_restored, conflicts
     else:
         # Partial restore - delete manifest to allow re-detach, but keep backup files
         manifest_path = backup_dir / MANIFEST_FILE
-        manifest_path.unlink(missing_ok=True)
+        unlink_project_file(project_dir, manifest_path, missing_ok=True)
         logger.warning(
             "Partial restore: %d/%d files - manifest removed to allow re-detach, backup files preserved",
             restored_count, expected_count
@@ -689,12 +627,11 @@ def update_gitignore(project_dir: Path) -> None:
 
         for pattern, comment in patterns:
             if not any(line.strip() == pattern for line in lines):
-                with open(gitignore_path, "a", encoding="utf-8") as f:
-                    f.write(f"\n# {comment}\n{pattern}\n")
+                append_project_file(project_dir, gitignore_path, f"\n# {comment}\n{pattern}\n".encode("utf-8"))
                 logger.info("Added %s to .gitignore", pattern)
     else:
         entries = "\n".join(f"# {comment}\n{pattern}" for pattern, comment in patterns)
-        gitignore_path.write_text(entries + "\n", encoding="utf-8")
+        write_project_file(project_dir, gitignore_path, (entries + "\n").encode("utf-8"))
         logger.info("Created .gitignore with backup entries")
 
 
@@ -739,7 +676,7 @@ def backup_conflicts(project_dir: Path, conflicts: list[str]) -> Path:
         Path to the backup directory
     """
     backup_dir = project_dir / PRE_REATTACH_BACKUP_DIR
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    make_project_dirs(project_dir, backup_dir)
     backup_dir_resolved = backup_dir.resolve()
 
     for rel_path in conflicts:
@@ -758,12 +695,8 @@ def backup_conflicts(project_dir: Path, conflicts: list[str]) -> Path:
             logger.debug("Skipping existing backup: %s", rel_path)
             continue
 
-        dest.parent.mkdir(parents=True, exist_ok=True)
-
-        if src.is_dir():
-            shutil.copytree(src, dest, symlinks=True)
-        else:
-            shutil.copy2(src, dest)
+        # A user file that is a symlink is backed up as a symlink, never its target
+        copy_project_entry(project_dir, src, dest)
 
         logger.debug("Backed up user file: %s", rel_path)
 
@@ -802,8 +735,7 @@ def restore_pre_reattach_backup(project_dir: Path) -> int:
                 continue  # Skip malicious path
 
             try:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item, dest)
+                copy_project_entry(project_dir, item, dest)
                 files_restored += 1
                 logger.debug("Restored user file: %s", rel_path)
             except OSError as e:
@@ -812,7 +744,7 @@ def restore_pre_reattach_backup(project_dir: Path) -> int:
 
     # Only clean up backup directory if all files were restored successfully
     if files_failed == 0:
-        shutil.rmtree(backup_dir)
+        remove_project_tree(project_dir, backup_dir)
         logger.info("Removed %s after restoring %d files", PRE_REATTACH_BACKUP_DIR, files_restored)
     else:
         logger.warning("Kept %s - %d files failed to restore", PRE_REATTACH_BACKUP_DIR, files_failed)
@@ -885,7 +817,7 @@ def detach_project(
         # Force mode: remove old backup and proceed
         backup_dir = project_dir / BACKUP_DIR
         if not dry_run:
-            shutil.rmtree(backup_dir)
+            remove_project_tree(project_dir, backup_dir)
             logger.info("Removed stale backup directory due to --force")
     elif state == "clean":
         return False, "No AutoForge files found in project.", None, 0
@@ -896,7 +828,7 @@ def detach_project(
     backup_dir = project_dir / BACKUP_DIR
     if backup_dir.exists() and not (backup_dir / MANIFEST_FILE).exists():
         if not dry_run:
-            shutil.rmtree(backup_dir)
+            remove_project_tree(project_dir, backup_dir)
             logger.info("Removed orphaned backup directory (no manifest)")
 
     # Check for agent lock

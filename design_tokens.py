@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from api.safe_project_io import write_project_file
 from autoforge_paths import get_design_tokens_path, get_prompts_dir
 
 logger = logging.getLogger(__name__)
@@ -273,8 +274,6 @@ class DesignTokensManager:
         Returns:
             Path to saved file
         """
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-
         data = {
             "colors": tokens.colors,
             "spacing": tokens.spacing,
@@ -284,7 +283,8 @@ class DesignTokensManager:
             "animations": tokens.animations,
         }
 
-        self.config_path.write_text(json.dumps(data, indent=2))
+        # Creates .autoforge/ if needed; never writes through a link planted in the project
+        write_project_file(self.project_dir, self.config_path, json.dumps(data, indent=2).encode("utf-8"))
         return self.config_path
 
     def generate_css(self, tokens: DesignTokens, output_path: Optional[Path] = None) -> str:
@@ -373,8 +373,8 @@ class DesignTokensManager:
         css_content = "\n".join(lines)
 
         if output_path:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(css_content)
+            # Never through a link the agent planted in the project
+            write_project_file(self.project_dir, output_path, css_content.encode("utf-8"))
 
         return css_content
 
@@ -434,8 +434,8 @@ module.exports = {config_json}
 """
 
         if output_path:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(js_content)
+            # Never through a link the agent planted in the project
+            write_project_file(self.project_dir, output_path, js_content.encode("utf-8"))
 
         return js_content
 
@@ -494,8 +494,8 @@ module.exports = {config_json}
         scss_content = "\n".join(lines)
 
         if output_path:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(scss_content)
+            # Never through a link the agent planted in the project
+            write_project_file(self.project_dir, output_path, scss_content.encode("utf-8"))
 
         return scss_content
 
@@ -764,11 +764,10 @@ def generate_design_tokens(project_dir: Path, style: str) -> Path | None:
 
     # Write design tokens (creates .autoforge/ if needed)
     tokens_path = get_design_tokens_path(project_dir)
-    tokens_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        tokens_path.write_text(json.dumps(preset, indent=2), encoding="utf-8")
+        write_project_file(project_dir, tokens_path, json.dumps(preset, indent=2).encode("utf-8"))
     except OSError:
-        # File write failed (permissions, disk full, etc.)
+        # File write failed (permissions, disk full, or a link planted in the project)
         return None
 
     return tokens_path

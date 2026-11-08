@@ -33,6 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+from api.safe_project_io import write_project_file
 from autoforge_paths import get_review_reports_dir
 
 logger = logging.getLogger(__name__)
@@ -528,13 +529,12 @@ class ReviewAgent:
     def save_report(self, report: ReviewReport) -> Path:
         """Save review report to file."""
         reports_dir = get_review_reports_dir(self.project_dir)
-        reports_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         report_path = reports_dir / f"review_{timestamp}.json"
 
-        with open(report_path, "w") as f:
-            json.dump(report.to_dict(), f, indent=2)
+        # Creates the reports directory; never writes through a link planted in the project
+        write_project_file(self.project_dir, report_path, json.dumps(report.to_dict(), indent=2).encode("utf-8"))
 
         return report_path
 

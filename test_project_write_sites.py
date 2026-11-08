@@ -516,3 +516,137 @@ def test_v2_migration_does_not_write_into_symlinked_autoforge_dir(project: Path,
     prompts._migrate_v2_to_v3(project)  # refusal is printed as a warning, not raised
 
     assert _outside_names(outside) == set()
+
+
+# ---------------------------------------------------------------------------
+# Reports, generated docs/tokens/workflows, visual snapshots, log exports
+# ---------------------------------------------------------------------------
+
+
+def test_review_and_security_reports_refuse_symlinked_autoforge_dir(project: Path, outside: Path) -> None:
+    from review_agent import ReviewAgent, ReviewReport
+    from security_scanner import ScanResult, SecurityScanner
+
+    _link_autoforge_outside(project, outside)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        ReviewAgent(project).save_report(ReviewReport(project_dir=str(project), review_time="t"))
+    with pytest.raises(sio.UnsafeProjectPathError):
+        SecurityScanner(project)._save_report(ScanResult(project_dir=str(project), scan_time="t"))
+    assert _outside_names(outside) == set()
+
+
+def test_design_tokens_not_written_through_symlinks(project: Path, outside: Path, victim: Path) -> None:
+    import design_tokens
+
+    (project / ".autoforge" / "design-tokens.json").symlink_to(victim)
+    (project / "src").symlink_to(outside, target_is_directory=True)
+    manager = design_tokens.DesignTokensManager(project)
+    tokens = manager.load()
+
+    manager.save(tokens)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        manager.generate_all()  # default output: src/styles/
+
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert _outside_names(outside) == {"victim.txt"}
+
+
+def test_generate_design_tokens_not_written_through_symlink(project: Path, victim: Path) -> None:
+    import design_tokens
+
+    (project / ".autoforge" / "design-tokens.json").symlink_to(victim)
+    path = design_tokens.generate_design_tokens(project, "neobrutalism")
+
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert path is not None and not path.is_symlink()
+
+
+def test_generated_docs_not_written_through_symlinks(project: Path, outside: Path, victim: Path) -> None:
+    from auto_documentation import DocumentationGenerator, ProjectDocs
+
+    (project / "README.md").symlink_to(victim)
+    (project / "docs").symlink_to(outside, target_is_directory=True)
+    generator = DocumentationGenerator(project)
+    docs = ProjectDocs("demo", "d", {}, [], [], [], [], [], {})
+
+    generator.write_readme(docs)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        generator.write_setup_guide(docs)
+
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert _outside_names(outside) == {"victim.txt"}
+
+
+def test_github_workflow_refuses_symlinked_github_dir(project: Path, outside: Path) -> None:
+    from integrations.ci.github_actions import GitHubWorkflow
+
+    (project / ".github").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        GitHubWorkflow(name="ci", filename="ci.yml", on={}, jobs={}).save(project)
+    assert _outside_names(outside) == set()
+
+
+def test_visual_snapshots_refuse_symlinked_dir(project: Path, outside: Path) -> None:
+    from visual_regression import VisualRegressionTester
+
+    (project / ".visual-snapshots").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        VisualRegressionTester(project)
+    assert _outside_names(outside) == set()
+
+
+def test_visual_baseline_update_does_not_copy_linked_screenshot(project: Path, outside: Path, victim: Path) -> None:
+    from visual_regression import VisualRegressionTester
+
+    tester = VisualRegressionTester(project)
+    (tester.current_dir / "home_desktop.png").symlink_to(victim)
+    (tester.baselines_dir / "other_desktop.png").symlink_to(outside / "created.png")  # dangling
+    (tester.current_dir / "other_desktop.png").write_bytes(b"png")
+
+    with pytest.raises(sio.UnsafeProjectPathError):
+        tester.update_baseline("home", "desktop")
+    assert tester.update_baseline("other", "desktop") is True
+
+    assert not (tester.baselines_dir / "home_desktop.png").exists()
+    assert _outside_names(outside) == {"victim.txt"}
+    assert (tester.baselines_dir / "other_desktop.png").read_bytes() == b"png"
+
+
+def test_visual_report_refuses_symlinked_reports_dir(project: Path, outside: Path) -> None:
+    from visual_regression import TestReport, VisualRegressionTester
+
+    tester = VisualRegressionTester(project)
+    (tester.snapshots_dir / "reports").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        tester.save_report(TestReport(project_dir=str(project), test_time="t"))
+    assert _outside_names(outside) == set()
+
+
+def _export_logs(project: Path, monkeypatch: pytest.MonkeyPatch, fmt: str) -> Any:
+    from server.routers import logs
+
+    monkeypatch.setattr(logs, "_get_project_path", lambda _name: project)
+    return asyncio.run(logs.export_logs(logs.ExportRequest(project_name="demo", format=fmt)))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("fmt", ["json", "jsonl", "csv"])
+def test_log_export_endpoint_writes_into_project(project: Path, monkeypatch: pytest.MonkeyPatch, fmt: str) -> None:
+    from structured_logging import get_logger
+
+    get_logger(project, agent_id="a1", console_output=False).info("hello")
+    result = _export_logs(project, monkeypatch, fmt)
+
+    exported = project / ".autocoder" / "exports" / result.filename
+    assert result.count == 1 and result.format == fmt
+    assert "hello" in exported.read_text()
+
+
+def test_log_export_refuses_symlinked_exports_dir(
+    project: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi import HTTPException
+
+    (project / ".autocoder").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(HTTPException):
+        _export_logs(project, monkeypatch, "jsonl")
+    assert _outside_names(outside) == set()

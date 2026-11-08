@@ -24,12 +24,15 @@ Requirements:
 """
 
 import asyncio
+import io
 import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from api.safe_project_io import make_project_dirs, read_project_file, unlink_project_file, write_project_file
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +158,9 @@ class VisualRegressionTester:
         self.current_dir = self.snapshots_dir / "current"
         self.diff_dir = self.snapshots_dir / "diffs"
 
-        # Ensure directories exist
-        self.baselines_dir.mkdir(parents=True, exist_ok=True)
-        self.current_dir.mkdir(parents=True, exist_ok=True)
-        self.diff_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure directories exist (never through a link planted in the project)
+        for folder in (self.baselines_dir, self.current_dir, self.diff_dir):
+            make_project_dirs(self.project_dir, folder)
 
     async def capture_screenshot(
         self,
@@ -203,7 +205,10 @@ class VisualRegressionTester:
                 # Small delay for animations to settle
                 await asyncio.sleep(0.5)
 
-                await page.screenshot(path=str(output_path), full_page=full_page)
+                # Take the bytes and write them ourselves: page.screenshot(path=...)
+                # would follow a link planted at the output path
+                image = await page.screenshot(full_page=full_page)
+                write_project_file(self.project_dir, output_path, image)
 
             finally:
                 await browser.close()
@@ -266,7 +271,9 @@ class VisualRegressionTester:
 
                 # Composite with original
                 result = Image.alpha_composite(baseline.convert("RGBA"), diff_highlight)
-                result.save(diff_path)
+                buffer = io.BytesIO()
+                result.save(buffer, format="PNG")
+                write_project_file(self.project_dir, diff_path, buffer.getvalue())
 
             passed = diff_percentage <= self.threshold
 
@@ -313,9 +320,7 @@ class VisualRegressionTester:
 
                 if not baseline_path.exists() or update_baseline:
                     # New baseline - copy current to baseline
-                    import shutil
-
-                    shutil.copy(current_path, baseline_path)
+                    write_project_file(self.project_dir, baseline_path, read_project_file(self.project_dir, current_path))
                     result.is_new = True
                     result.passed = True
                     report.new += 1
@@ -388,13 +393,11 @@ class VisualRegressionTester:
     def save_report(self, report: TestReport) -> Path:
         """Save test report to file."""
         reports_dir = self.snapshots_dir / "reports"
-        reports_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         report_path = reports_dir / f"visual_test_{timestamp}.json"
 
-        with open(report_path, "w") as f:
-            json.dump(report.to_dict(), f, indent=2)
+        write_project_file(self.project_dir, report_path, json.dumps(report.to_dict(), indent=2).encode("utf-8"))
 
         return report_path
 
@@ -420,14 +423,12 @@ class VisualRegressionTester:
         baseline_path = self.baselines_dir / filename
 
         if current_path.exists():
-            import shutil
-
-            shutil.copy(current_path, baseline_path)
+            write_project_file(self.project_dir, baseline_path, read_project_file(self.project_dir, current_path))
 
             # Clean up diff if exists
             diff_path = self.diff_dir / f"{name}_{viewport}_diff.png"
             if diff_path.exists():
-                diff_path.unlink()
+                unlink_project_file(self.project_dir, diff_path)
 
             return True
 
@@ -467,7 +468,7 @@ class VisualRegressionTester:
         baseline_path = self.baselines_dir / filename
 
         if baseline_path.exists():
-            baseline_path.unlink()
+            unlink_project_file(self.project_dir, baseline_path)
             return True
 
         return False

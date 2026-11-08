@@ -1117,17 +1117,17 @@ class TestBackupAtomicity(unittest.TestCase):
         """Should preserve originals if copy fails."""
         files = detach.get_autoforge_files(self.project_dir)
 
-        # Mock shutil.copy2 to fail on second file
-        original_copy2 = shutil.copy2
+        # Make the copy of the second file fail
+        original_copy = detach.copy_project_entry
         call_count = [0]
 
-        def failing_copy2(src, dst):
+        def failing_copy(project_dir, src, dst):
             call_count[0] += 1
             if call_count[0] > 1:
                 raise OSError("Simulated copy failure")
-            return original_copy2(src, dst)
+            return original_copy(project_dir, src, dst)
 
-        with patch('detach.shutil.copy2', side_effect=failing_copy2):
+        with patch('detach.copy_project_entry', side_effect=failing_copy):
             with self.assertRaises(OSError):
                 detach.create_backup(self.project_dir, "test", files)
 
@@ -1639,6 +1639,103 @@ class TestServerDependencies(unittest.TestCase):
 
         result = check_project_detached_for_background(self.project_dir)
         self.assertTrue(result)
+
+
+class TestPlantedLinks(unittest.TestCase):
+    """Detach/reattach run outside the agent sandbox: links the agent planted in the
+    project or in a backup folder must never be followed out of the project."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        root = Path(self.temp_dir).resolve()
+        self.project_dir = root / "project"
+        self.project_dir.mkdir()
+        self.outside = root / "outside"
+        self.outside.mkdir()
+        (self.outside / "id_rsa").write_text("secret")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def _outside_names(self):
+        return {p.name for p in self.outside.iterdir()}
+
+    def test_backup_refuses_symlinked_backup_dir(self):
+        (self.project_dir / "features.db").write_bytes(b"db")
+        (self.project_dir / detach.BACKUP_DIR).symlink_to(self.outside, target_is_directory=True)
+        files = detach.get_autoforge_files(self.project_dir)
+
+        with self.assertRaises(OSError):
+            detach.create_backup(self.project_dir, "test", files)
+
+        self.assertEqual((self.project_dir / "features.db").read_bytes(), b"db")
+        self.assertEqual(self._outside_names(), {"id_rsa"})
+
+    def test_backup_keeps_nested_pattern_matches_and_deletes_originals(self):
+        (self.project_dir / ".autoforge").mkdir()
+        (self.project_dir / ".autoforge" / "test-login.json").write_text("{}")
+        (self.project_dir / ".autoforge" / "link").symlink_to(self.outside / "id_rsa")
+        files = detach.get_autoforge_files(self.project_dir)
+
+        detach.create_backup(self.project_dir, "test", files)
+
+        backup = self.project_dir / detach.BACKUP_DIR / ".autoforge"
+        self.assertFalse((self.project_dir / ".autoforge").exists())
+        self.assertEqual((backup / "test-login.json").read_text(), "{}")
+        self.assertTrue((backup / "link").is_symlink())
+
+    def test_restore_does_not_copy_files_through_a_symlinked_backup_folder(self):
+        backup = self.project_dir / detach.BACKUP_DIR
+        backup.mkdir()
+        (backup / "prompts").symlink_to(self.outside, target_is_directory=True)
+        manifest = {
+            "version": 1, "detached_at": "now", "project_name": "test", "autocoder_version": "x",
+            "files": [{"path": "prompts/id_rsa", "type": "file", "size": 6, "checksum": None, "file_count": None}],
+            "total_size_bytes": 6, "file_count": 1,
+        }
+        (backup / detach.MANIFEST_FILE).write_text(json.dumps(manifest))
+
+        success, _restored, _conflicts = detach.restore_backup(self.project_dir)
+
+        self.assertFalse(success)
+        self.assertFalse((self.project_dir / "prompts" / "id_rsa").exists())
+
+    def test_restore_counts_symlink_whose_target_is_gone(self):
+        target = self.project_dir / "docs.md"
+        target.write_text("docs")
+        (self.project_dir / "CLAUDE.md").symlink_to(target)
+        files = detach.get_autoforge_files(self.project_dir)
+        detach.create_backup(self.project_dir, "test", files)
+        target.unlink()  # the link in the backup now dangles
+
+        success, _restored, _conflicts = detach.restore_backup(self.project_dir)
+
+        self.assertTrue(success)
+        self.assertTrue((self.project_dir / "CLAUDE.md").is_symlink())
+
+    def test_conflict_backup_copies_a_symlinked_user_file_as_a_link(self):
+        (self.project_dir / "CLAUDE.md").symlink_to(self.outside / "id_rsa")
+
+        backup_dir = detach.backup_conflicts(self.project_dir, ["CLAUDE.md"])
+
+        self.assertTrue((backup_dir / "CLAUDE.md").is_symlink())
+
+    def test_pre_reattach_restore_copies_links_as_links(self):
+        backup_dir = self.project_dir / detach.PRE_REATTACH_BACKUP_DIR
+        backup_dir.mkdir()
+        (backup_dir / "notes.md").symlink_to(self.outside / "id_rsa")
+
+        detach.restore_pre_reattach_backup(self.project_dir)
+
+        self.assertTrue((self.project_dir / "notes.md").is_symlink())
+
+    def test_gitignore_not_created_through_dangling_symlink(self):
+        (self.project_dir / ".gitignore").symlink_to(self.outside / "created")
+
+        detach.update_gitignore(self.project_dir)
+
+        self.assertEqual(self._outside_names(), {"id_rsa"})
+        self.assertIn(detach.BACKUP_DIR, (self.project_dir / ".gitignore").read_text())
 
 
 if __name__ == "__main__":

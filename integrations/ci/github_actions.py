@@ -18,6 +18,8 @@ from typing import Any, Literal, Optional, cast
 
 import yaml
 
+from api.safe_project_io import write_project_file
+
 
 class WorkflowTrigger(str, Enum):
     """Workflow trigger types."""
@@ -83,11 +85,10 @@ class GitHubWorkflow:
     def save(self, project_dir: Path) -> Path:
         """Save workflow to .github/workflows directory."""
         workflows_dir = project_dir / ".github" / "workflows"
-        workflows_dir.mkdir(parents=True, exist_ok=True)
 
         output_path = workflows_dir / self.filename
-        with open(output_path, "w") as f:
-            f.write(self.to_yaml())
+        # Creates .github/workflows; never writes through a link planted in the project
+        write_project_file(project_dir, output_path, self.to_yaml().encode("utf-8"))
 
         return output_path
 

@@ -24,18 +24,21 @@ Log Format:
 """
 
 import hashlib
+import io
 import json
 import logging
 import sqlite3
 import threading
 import time
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, Optional, TextIO, cast
 
 from api.database import fall_back_to_rollback_journal, is_wal_io_error, select_journal_mode
+from api.safe_project_io import open_project_file_for_write
 from autoforge_paths import get_logs_db_path
 
 # Type aliases
@@ -381,6 +384,19 @@ class StructuredLogger:
         self._log("error", message, **kwargs)
 
 
+@contextmanager
+def _open_export(output_path: Path, project_dir: Optional[Path], newline: Optional[str] = None) -> Iterator[TextIO]:
+    """Open an export file for writing; inside a project, never through a planted link."""
+    if project_dir is None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", newline=newline) as f:
+            yield f
+        return
+    with open_project_file_for_write(project_dir, output_path) as raw:
+        with io.TextIOWrapper(raw, newline=newline) as f:
+            yield f
+
+
 class LogQuery:
     """
     Query interface for structured logs.
@@ -635,6 +651,7 @@ class LogQuery:
         output_path: Path,
         output_format: Literal["json", "jsonl", "csv"] = "jsonl",
         batch_size: int = 1000,
+        project_dir: Optional[Path] = None,
         **filters,
     ) -> int:
         """
@@ -644,6 +661,8 @@ class LogQuery:
             output_path: Output file path
             output_format: Export format (json, jsonl, csv)
             batch_size: Number of rows to fetch per batch (default 1000)
+            project_dir: When output_path is inside this project directory, it is
+                written without following links the agent planted there
             **filters: Query filters
 
         Returns:
@@ -652,14 +671,13 @@ class LogQuery:
         import csv
 
         output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
 
         count = 0
 
         if output_format == "json":
             # For JSON format, we still need to collect all to produce valid JSON
             # but we stream to avoid massive single query
-            with open(output_path, "w") as f:
+            with _open_export(output_path, project_dir) as f:
                 f.write("[\n")
                 first = True
                 for log in self._iter_logs(batch_size=batch_size, **filters):
@@ -671,14 +689,14 @@ class LogQuery:
                 f.write("\n]")
 
         elif output_format == "jsonl":
-            with open(output_path, "w") as f:
+            with _open_export(output_path, project_dir) as f:
                 for log in self._iter_logs(batch_size=batch_size, **filters):
                     f.write(json.dumps(log) + "\n")
                     count += 1
 
         elif output_format == "csv":
             fieldnames = None
-            with open(output_path, "w", newline="") as f:
+            with _open_export(output_path, project_dir, newline="") as f:
                 writer = None
                 for log in self._iter_logs(batch_size=batch_size, **filters):
                     if writer is None:

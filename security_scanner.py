@@ -26,6 +26,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+from api.safe_project_io import write_project_file
 from autoforge_paths import get_security_reports_dir
 
 
@@ -669,13 +670,12 @@ class SecurityScanner:
     def _save_report(self, result: ScanResult) -> None:
         """Save scan report to file."""
         reports_dir = get_security_reports_dir(self.project_dir)
-        reports_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         report_path = reports_dir / f"security_scan_{timestamp}.json"
 
-        with open(report_path, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
+        # Creates the reports directory; never writes through a link planted in the project
+        write_project_file(self.project_dir, report_path, json.dumps(result.to_dict(), indent=2).encode("utf-8"))
 
 
 def scan_project(
