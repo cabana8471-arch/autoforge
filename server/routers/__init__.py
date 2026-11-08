@@ -15,6 +15,7 @@ from .expand_project import router as expand_project_router
 from .features import router as features_router
 from .filesystem import router as filesystem_router
 from .git_workflow import router as git_workflow_router
+from .github import router as github_router
 from .import_project import router as import_project_router
 from .knowledge import router as knowledge_router
 from .logs import router as logs_router
@@ -55,4 +56,5 @@ __all__ = [
     "visual_regression_router",
     "knowledge_router",
     "skills_router",
+    "github_router",
 ]

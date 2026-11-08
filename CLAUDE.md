@@ -153,6 +153,7 @@ python -m pytest test_usage_tracker.py        # Token/cost tracking tests
 python -m pytest test_billing_utils.py        # Spend safeguards: billing stop, run cap from usage records, cost of an aborted session
 python -m pytest test_spend_stop_status.py    # Exit codes 3/4 are "stopped" with a reason, never "crashed" (no scheduler restart)
 python -m pytest test_project_skills.py       # Project skills: library (no ~/.claude/skills), install/remove, planted links, Skill tool
+python -m pytest test_github_issues.py        # GitHub issue import: parsing, endpoints, comments excluded by default
 ```
 
 ### React UI
@@ -243,6 +244,7 @@ The FastAPI server provides REST and WebSocket endpoints for the UI:
 - `settings.py` - Global settings management (model selection, YOLO, batch size, headless browser)
 - `knowledge.py` - Upload/list/read/delete project knowledge documents (`.autoforge/knowledge/*.md`)
 - `skills.py` - Skill library listing and per-project skill install/remove
+- `github.py` - Import GitHub issues as features (repo auto-detected from git remote; token from `GITHUB_TOKEN`/`GH_TOKEN` or `gh auth token`)
 
 **Services** (`server/services/`):
 - `process_manager.py` - Agent process lifecycle management
