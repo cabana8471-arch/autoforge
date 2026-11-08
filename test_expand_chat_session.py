@@ -258,3 +258,15 @@ def test_mutation_tools_remain_disabled(tmp_path: Path) -> None:
         assert tool not in options.allowed_tools
         assert tool in options.disallowed_tools
         assert tool in captured["settings"]["permissions"]["deny"]
+
+
+def test_expand_session_cannot_read_outside_the_project(tmp_path: Path) -> None:
+    """Expand mode has web tools and reads project files: no bypass mode (it allowed
+    reading any file on disk), only Read(./**) for files."""
+    captured = _start_session(tmp_path)
+    assert captured["options"].permission_mode == "default"
+    assert captured["settings"]["permissions"]["defaultMode"] == "default"
+    assert "Read(./**)" in captured["settings"]["permissions"]["allow"]
+    for bare in ("Read", "Glob", "Grep"):  # a bare name approves the tool for every path
+        assert bare not in captured["options"].allowed_tools
+    assert "Read(./**)" in captured["options"].allowed_tools

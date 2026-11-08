@@ -130,3 +130,21 @@ def test_remove_legacy_claude_md_without_file(tmp_path: Path) -> None:
     remove_legacy_claude_md(tmp_path)  # must not raise
 
     assert not (tmp_path / "CLAUDE.md").exists()
+
+
+def test_assistant_cannot_read_outside_the_project(tmp_path: Path) -> None:
+    """It reads agent-written files and has WebFetch: bypass mode let it Read any file
+    on disk (checked live, CLI 2.1.319), so text planted in the project could send
+    secrets out. Default mode with Read(./**) refuses reads outside the project."""
+    import json
+
+    _start_assistant(tmp_path)
+    options = FakeClaudeSDKClient.instances[-1].options
+    settings = json.loads(Path(options.settings).read_text(encoding="utf-8"))
+    assert options.permission_mode == "default"
+    assert settings["permissions"]["defaultMode"] == "default"
+    assert "Read(./**)" in settings["permissions"]["allow"]
+    # A bare tool name in allowed_tools approves it for every path on disk
+    for bare in ("Read", "Glob", "Grep"):
+        assert bare not in options.allowed_tools
+    assert "Read(./**)" in options.allowed_tools

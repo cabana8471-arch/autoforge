@@ -77,9 +77,9 @@ ASSISTANT_MCP_TOOLS = ASSISTANT_FEATURE_TOOLS + AGENT_CONTROL_TOOLS
 
 # Read-only built-in tools (no Write, Edit, Bash)
 READONLY_BUILTIN_TOOLS = [
-    "Read",
-    "Glob",
-    "Grep",
+    # A path rule, not the bare name: "Read" would approve reading any file on disk.
+    # Read rules also cover Glob and Grep (still available, limited to the project).
+    "Read(./**)",
     "WebFetch",
     "WebSearch",
 ]
@@ -325,7 +325,10 @@ class AssistantChatSession:
         security_settings = {
             "sandbox": {"enabled": False},  # No bash, so sandbox not needed
             "permissions": {
-                "defaultMode": "bypassPermissions",  # Read-only, no dangerous ops
+                # Not bypassPermissions: that mode let Read open any file on disk, and the
+                # assistant reads agent-written files and has WebFetch. In default mode only
+                # the allow list runs (non-interactive: anything else is refused).
+                "defaultMode": "default",
                 "allow": permissions_list,
                 "deny": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"],
             },
@@ -394,7 +397,7 @@ class AssistantChatSession:
                     allowed_tools=[*READONLY_BUILTIN_TOOLS, *ASSISTANT_MCP_TOOLS],
                     disallowed_tools=DISALLOWED_ASSISTANT_TOOLS,
                     mcp_servers=mcp_servers,
-                    permission_mode="bypassPermissions",
+                    permission_mode="default",  # see the settings above
                     max_turns=100,
                     cwd=str(self.project_dir.resolve()),
                     settings=str(settings_file.resolve()),

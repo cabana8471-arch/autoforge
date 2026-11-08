@@ -131,9 +131,9 @@ def parse_created_features(
 # Read-only built-in tools for the expand session. WebFetch/WebSearch let the
 # user point Claude at reference URLs (e.g. UI examples) while defining features.
 EXPAND_BUILTIN_TOOLS = [
-    "Read",
-    "Glob",
-    "Grep",
+    # A path rule, not the bare name: "Read" would approve reading any file on disk.
+    # Read rules also cover Glob and Grep (still available, limited to the project).
+    "Read(./**)",
     "WebFetch",
     "WebSearch",
 ]
@@ -372,15 +372,19 @@ class ExpandChatSession:
             denied_tools += web_tools
 
         # Create temporary security settings file (unique per session to avoid conflicts)
-        # Note: permission_mode="bypassPermissions" is safe here because:
-        # 1. Bash (and in expand mode Write/Edit) is removed via disallowed_tools and the "deny" list
-        # 2. In onboard mode a PreToolUse hook blocks writes to anything but app_spec.txt
+        # Expand mode has web tools, so it runs in default mode: only the allow list runs and
+        # Read stays inside the project (bypassPermissions let Read open any file on disk,
+        # which planted text could then send out with WebFetch).
+        # Onboard mode keeps bypassPermissions to write app_spec.txt; that is safe because:
+        # 1. It has no web tools, so nothing it reads can be sent out
+        # 2. A PreToolUse hook blocks writes to anything but app_spec.txt
         # 3. MCP tools are restricted to feature creation only
         # 4. No Bash access - cannot execute arbitrary commands
+        permission_mode: Literal["bypassPermissions", "default"] = "bypassPermissions" if is_onboard else "default"
         security_settings = {
             "sandbox": {"enabled": True},
             "permissions": {
-                "defaultMode": "bypassPermissions",
+                "defaultMode": permission_mode,
                 "allow": [
                     "Read(./**)",  # covers Glob and Grep (the CLI ignores Glob/Grep path rules)
                     *([] if is_onboard else web_tools),
@@ -447,7 +451,7 @@ class ExpandChatSession:
                             ),
                         ],
                     } if is_onboard else None,
-                    permission_mode="bypassPermissions",
+                    permission_mode=permission_mode,
                     max_turns=100,
                     cwd=str(self.project_dir.resolve()),
                     settings=str(settings_file.resolve()),
