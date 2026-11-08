@@ -197,7 +197,8 @@ class SpecChatSession:
 
         # Create security settings file (like client.py does)
         # This grants permissions for file operations in the project directory
-        from security import cli_absolute_rule, protected_config_paths
+        from security import cli_absolute_rule, protected_config_paths, protected_database_paths
+        protected = [*protected_config_paths(self.project_dir), *protected_database_paths(self.project_dir)]
         security_settings = {
             "sandbox": {"enabled": False},  # Disable sandbox for spec creation
             "permissions": {
@@ -212,8 +213,9 @@ class SpecChatSession:
                 ],
                 # No terminal in the web UI means nobody can approve a shell
                 # command, so remove shell access outright (see issue #14).
-                # The project allowlist is edited only by the user.
-                "deny": [*NO_SHELL_TOOLS, *(cli_absolute_rule("Edit", Path(p)) for p in protected_config_paths(self.project_dir))],
+                # The project allowlist is edited only by the user; the feature
+                # database changes only through the feature MCP server.
+                "deny": [*NO_SHELL_TOOLS, *(cli_absolute_rule("Edit", Path(p)) for p in protected)],
             },
         }
         from api.safe_project_io import write_project_file

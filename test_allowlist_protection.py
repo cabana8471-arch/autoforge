@@ -107,9 +107,10 @@ def test_agent_settings_deny_the_allowlist(project: Path) -> None:
         client.create_client(project, "claude-opus-4-6")
 
     settings = json.loads((project / ".autoforge" / ".claude_settings.json").read_text(encoding="utf-8"))
-    protected = protected_config_paths(project)
-    assert settings["sandbox"]["filesystem"]["denyWrite"] == protected
-    assert settings["permissions"]["deny"] == [cli_absolute_rule("Edit", Path(path)) for path in protected]
+    # (the feature database is protected next to it: test_feature_db_protection.py)
+    for path in protected_config_paths(project):
+        assert path in settings["sandbox"]["filesystem"]["denyWrite"]
+        assert cli_absolute_rule("Edit", Path(path)) in settings["permissions"]["deny"]
     # The CLI ignores Write/Glob/Grep(...) rules (only Edit and Read rules match file tools) and warns
     assert not any(rule.startswith(("Write(", "Glob(", "Grep(")) for rule in settings["permissions"]["allow"])
 

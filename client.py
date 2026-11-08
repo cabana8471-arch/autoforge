@@ -17,7 +17,13 @@ from dotenv import load_dotenv
 
 from env_constants import find_claude_cli
 from quality_gates import QUALITY_GATE_ENV_VARS
-from security import SENSITIVE_DIRECTORIES, bash_security_hook, cli_absolute_rule, protected_config_paths
+from security import (
+    SENSITIVE_DIRECTORIES,
+    bash_security_hook,
+    cli_absolute_rule,
+    protected_config_paths,
+    protected_database_paths,
+)
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -422,9 +428,11 @@ def create_client(
     # Note: Using relative paths ("./**") restricts access to project directory
     # since cwd is set to project_dir
     # The project allowlist widens what the agent may run: only the user edits it.
-    # Edit deny blocks the file tools (through symlinks too); denyWrite makes it
+    # The feature database (features, spend records, evidence) changes only through
+    # the feature MCP server, which runs outside the sandbox.
+    # Edit deny blocks the file tools (through symlinks too); denyWrite makes them
     # read-only for sandboxed Bash, interpreters included.
-    protected_files = protected_config_paths(project_dir)
+    protected_files = [*protected_config_paths(project_dir), *protected_database_paths(project_dir)]
     security_settings = {
         "sandbox": {
             "enabled": True,

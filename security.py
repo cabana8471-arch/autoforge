@@ -795,6 +795,27 @@ def protected_config_paths(project_dir: Path) -> list[str]:
     return [str(root / relative) for relative in PROJECT_ALLOWLIST_FILES]
 
 
+# Project-relative locations of the feature database (current, legacy .autocoder, legacy root)
+# with its SQLite side files (WAL mode, or rollback journal on network filesystems)
+PROJECT_DATABASE_NAME = "features.db"
+# Commands that may name the database in a Bash command (they only look at the file entry)
+DATABASE_LIST_COMMANDS = frozenset({"ls", "stat", "file", "du"})
+PROJECT_DATABASE_FILES = tuple(
+    f"{base}{PROJECT_DATABASE_NAME}{suffix}" for base in (".autoforge/", ".autocoder/", "") for suffix in ("", "-wal", "-shm", "-journal")
+)
+
+
+def protected_database_paths(project_dir: Path) -> list[str]:
+    """Absolute paths of the feature database files, which the agent changes only through the feature MCP server.
+
+    The database holds feature states, test evidence and the spend records the
+    cost cap reads, so agent settings make it read-only for sandboxed Bash and
+    deny the file tools on it. The MCP server runs outside the sandbox.
+    """
+    root = project_dir.resolve()
+    return [str(root / relative) for relative in PROJECT_DATABASE_FILES]
+
+
 def cli_absolute_rule(tool: str, path: PurePath, suffix: str = "") -> str:
     """Claude Code permission rule for an absolute path, e.g. ``Edit(//home/me/x)``.
 
@@ -1364,6 +1385,17 @@ def _validate_command_line(
             "reason": (
                 f"Only the user can change {PROJECT_ALLOWLIST_FILES[0]}. "
                 "Do not edit it; if a command is missing, tell the user which one and why."
+            ),
+        }
+
+    # The feature database changes only through the feature MCP server. The sandbox mounts it
+    # read-only, where even a read fails (SQLite writes its -wal/-shm files): give the reason up front.
+    if PROJECT_DATABASE_NAME in line and any(c not in DATABASE_LIST_COMMANDS for c in commands):
+        return {
+            "decision": "block",
+            "reason": (
+                f"{PROJECT_DATABASE_NAME} is read-only for Bash (even reads fail in the sandbox). "
+                "Use the feature_* MCP tools to read or change features."
             ),
         }
 

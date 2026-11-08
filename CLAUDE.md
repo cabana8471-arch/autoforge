@@ -145,6 +145,7 @@ python -m pytest test_project_database_links.py  # features/assistant/logs .db (
 python -m pytest test_onboard_project.py       # Onboarding: spec-only write hook, passes=true only in the onboard session
 python -m pytest test_chat_ws_keepalive.py     # Chat WebSockets: long turns survive pings, network drop finishes the turn, closing the chat cancels it
 python -m pytest test_allowlist_protection.py     # The agent cannot edit the project allowlist (settings deny, sandbox denyWrite, Bash hook)
+python -m pytest test_feature_db_protection.py    # features.db (+ -wal/-shm/-journal, legacy locations) read-only for agent Bash and file tools; MCP server unaffected
 python -m pytest test_api_providers.py        # API provider env tests (GLM, Gemini, Kimi Code, Moonshot)
 python -m pytest test_settings_provider_switch.py  # Provider switch resets base URL and clears the previous key
 python -m pytest test_usage_tracker.py        # Token/cost tracking tests
@@ -364,6 +365,8 @@ Defense-in-depth approach configured in `client.py`:
 3. Bash commands validated using hierarchical allowlist system
 
 **Linux: no `playwright-cli` inside the agent sandbox.** The sandbox blocks Unix sockets on Linux (seccomp, no per-path exception: `sandbox.network.allowUnixSockets` is macOS-only), so the `playwright-cli` daemon cannot start and the feature modal's Live Browser view gets no screenshots. Agents fall back to `playwright-core` directly. This is deliberate (user decision 08.11.2026): `allowAllUnixSockets` would open every Unix socket (docker, ssh-agent) and `excludedCommands: playwright-cli` would run it unsandboxed with an agent-writable `.playwright/cli.config.json`.
+
+**The feature database is read-only for the agent.** `features.db` and its side files (all layouts) are in `sandbox.filesystem.denyWrite` and denied to the file tools (`security.protected_database_paths`), and the Bash hook refuses commands naming it with the reason; the agent changes features only through the feature MCP server, which runs outside the sandbox (user decision 08.11.2026). Even a read fails inside the sandbox (SQLite writes `-wal`/`-shm`).
 
 **Out-of-sandbox file access** goes through `api/safe_project_io.py` (no symlinks, hard links or junctions followed), so a link inside a project is refused even when the user made it; replace it with the real file.
 
