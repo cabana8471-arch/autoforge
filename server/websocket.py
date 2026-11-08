@@ -993,18 +993,23 @@ async def project_websocket(websocket: WebSocket, project_name: str):
             "url": devserver_manager.detected_url,
         })
 
-        # Send initial progress
+        # Send initial progress (none when the database is refused: no false 0/0)
+        from api.safe_project_io import UnsafeProjectPathError
         count_passing_tests = _get_count_passing_tests()
-        passing, in_progress, total, needs_human_input = count_passing_tests(project_dir)
-        percentage = (passing / total * 100) if total > 0 else 0
-        await websocket.send_json({
-            "type": "progress",
-            "passing": passing,
-            "in_progress": in_progress,
-            "total": total,
-            "percentage": round(percentage, 1),
-            "needs_human_input": needs_human_input,
-        })
+        try:
+            passing, in_progress, total, needs_human_input = count_passing_tests(project_dir)
+        except UnsafeProjectPathError as e:
+            logger.warning("No progress for %s: %s", project_name, e)
+        else:
+            percentage = (passing / total * 100) if total > 0 else 0
+            await websocket.send_json({
+                "type": "progress",
+                "passing": passing,
+                "in_progress": in_progress,
+                "total": total,
+                "percentage": round(percentage, 1),
+                "needs_human_input": needs_human_input,
+            })
 
         # Keep connection alive and handle incoming messages
         while True:

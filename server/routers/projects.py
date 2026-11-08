@@ -6,6 +6,7 @@ API endpoints for project management.
 Uses project registry for path lookups instead of fixed generations/ directory.
 """
 
+import logging
 import re
 import shutil
 import sys
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException
+
+from api.safe_project_io import UnsafeProjectPathError
 
 from ..schemas import (
     DetachResponse,
@@ -27,6 +30,8 @@ from ..schemas import (
     ProjectSummary,
     ReattachResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 # Lazy imports to avoid circular dependencies
 # These are initialized by _init_imports() before first use.
@@ -175,7 +180,13 @@ async def list_projects():
             continue
 
         has_spec = _check_spec_exists(project_dir)
-        stats = get_project_stats(project_dir)
+        try:
+            stats = get_project_stats(project_dir)
+        except UnsafeProjectPathError as e:
+            # One project with a refused database must not break the whole list;
+            # its own endpoints answer 409 with the reason
+            logger.warning("No stats for project %s: %s", name, e)
+            stats = ProjectStats(passing=0, in_progress=0, total=0, percentage=0.0)
 
         result.append(ProjectSummary(
             name=name,
