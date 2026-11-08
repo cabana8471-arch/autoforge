@@ -397,6 +397,28 @@ When test progress increases, the agent sends:
 }
 ```
 
+### GitHub / Git Remote Integration (Auto-Push)
+
+The agent commits its work to the project's local git repository after every feature. AutoForge can optionally push those commits to a remote (GitHub, GitLab, etc.) after each successful coding session. It is off by default and turned on per project: **Settings > Version Control > Auto-push** for the selected project.
+
+Turning it on stores the URL the remote (`origin`) points to at that moment, and the page shows it. Every push goes explicitly to that stored URL; the current branch is pushed to the branch of the same name. Because the agent can run `git` commands in the project and the push runs outside its sandbox:
+
+- a push is refused when `git remote get-url origin` no longer matches the stored URL (turn auto-push off and on again to trust a new URL);
+- a push is refused when the project's `.git/config` sets keys that can redirect it or run a program (`url.*` insteadOf rewrites, `core.sshCommand`, `credential.*`, `include.*`, `http.*`, `gpg.*`, ...); keep such settings in your global git config;
+- git hooks never run for the push, it never force-pushes, never creates repositories or remotes, and runs non-interactively, so credentials must already work (`gh auth setup-git`, an SSH key, or a credential helper in your global config).
+
+Skipped or refused pushes are reported in the agent log with a `[GIT]` prefix and never stop the agent.
+
+A typical feature-branch workflow:
+
+```bash
+cd /path/to/my-project
+gh repo create my-project --private --source=. --push   # one-time: create remote and push existing commits
+git checkout -b feature/new-dashboard                    # work on a branch instead of main
+```
+
+Then turn on auto-push for the project and start the agent: each coding session's commits land on `feature/new-dashboard` on GitHub, ready for a pull request.
+
 ### Alternative API Providers (GLM, Ollama, Kimi, Gemini, Custom)
 
 Alternative providers are configured via the **Settings UI** (gear icon > API Provider). Select your provider, set the base URL, auth token, and model directly in the UI — no `.env` changes needed. Switching provider clears the saved auth token (a key is never sent to another provider), so paste the new provider's key after switching.

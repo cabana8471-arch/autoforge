@@ -52,6 +52,7 @@ from .routers import (
     expand_project_router,
     features_router,
     filesystem_router,
+    git_push_router,
     git_workflow_router,
     github_router,
     import_project_router,
@@ -229,6 +230,7 @@ app.include_router(visual_regression_router)
 app.include_router(knowledge_router)
 app.include_router(skills_router)
 app.include_router(github_router)
+app.include_router(git_push_router)
 
 
 # ============================================================================

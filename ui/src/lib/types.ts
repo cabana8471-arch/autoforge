@@ -904,3 +904,15 @@ export interface SkillInstallResponse {
   skipped: string[]
   skills: SkillInfo[]
 }
+
+// ============================================================================
+// Git auto-push (per project)
+// ============================================================================
+
+export interface GitPushStatus {
+  enabled: boolean
+  remote: string | null
+  url: string | null          // Stored (trusted) URL that pushes go to
+  current_url: string | null  // What `git remote get-url <remote>` says now
+  unsafe_config: string[]     // Repo-local git config keys that block the push
+}

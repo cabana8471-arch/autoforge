@@ -12,6 +12,8 @@ import { useSettings, useUpdateSettings, useAvailableModels, useAvailableProvide
 import { useTheme, THEMES } from '@/hooks/useTheme'
 import type { EffortLevel, Maturity, ProviderInfo } from '@/lib/types'
 import { MaturityOrderSetting } from '@/components/MaturityOrderSetting'
+import { GitAutoPushCard } from '@/components/GitAutoPushCard'
+import { useAppContext } from '@/contexts/AppContext'
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
@@ -35,6 +37,7 @@ export function SettingsView() {
   const { data: providersData } = useAvailableProviders()
   const updateSettings = useUpdateSettings()
   const { theme, setTheme, darkMode, toggleDarkMode } = useTheme()
+  const { selectedProject } = useAppContext()
 
   const [showAuthToken, setShowAuthToken] = useState(false)
   const [authTokenInput, setAuthTokenInput] = useState('')
@@ -624,6 +627,9 @@ export function SettingsView() {
                 />
               </CardContent>
             </Card>
+
+            {/* Per-project git auto-push */}
+            <GitAutoPushCard projectName={selectedProject} />
 
             {/* Update Error */}
             {updateSettings.isError && (

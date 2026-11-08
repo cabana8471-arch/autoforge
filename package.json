@@ -33,6 +33,7 @@
     "billing_utils.py",
     "client.py",
     "env_constants.py",
+    "git_sync.py",
     "parallel_orchestrator.py",
     "progress.py",
     "project_skills.py",

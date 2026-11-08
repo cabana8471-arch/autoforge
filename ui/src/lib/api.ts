@@ -45,6 +45,7 @@ import type {
   KnowledgeListResponse,
   KnowledgeFileContent,
   SkillInfo,
+  GitPushStatus,
   SkillInstallResponse,
 } from './types'
 
@@ -754,4 +755,19 @@ export async function deleteKnowledgeFile(projectName: string, filename: string)
     `/projects/${encodeURIComponent(projectName)}/knowledge/${encodeURIComponent(filename)}`,
     { method: 'DELETE' }
   )
+}
+
+// ============================================================================
+// Git auto-push API (per project)
+// ============================================================================
+
+export async function getGitPush(projectName: string): Promise<GitPushStatus> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/git-push`)
+}
+
+export async function updateGitPush(projectName: string, enabled: boolean): Promise<GitPushStatus> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/git-push`, {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  })
 }
