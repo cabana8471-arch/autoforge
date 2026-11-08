@@ -139,6 +139,7 @@ python -m pytest test_test_evidence.py         # Test evidence: screenshot copie
 python -m pytest test_project_import.py        # Re-register an AutoForge folder (API, wizard detection, CLI option 4)
 python -m pytest test_safe_project_io.py       # No-follow project I/O used outside the agent sandbox
 python -m pytest test_onboard_project.py       # Onboarding: spec-only write hook, passes=true only in the onboard session
+python -m pytest test_chat_ws_keepalive.py     # Chat WebSockets: long turns survive pings, network drop finishes the turn, closing the chat cancels it
 ```
 
 ### React UI

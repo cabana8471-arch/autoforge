@@ -8,7 +8,7 @@ Allows adding multiple features to existing projects via natural language.
 
 import json
 import logging
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
@@ -25,6 +25,8 @@ from ..services.expand_chat_session import (
 )
 from ..utils.project_helpers import get_project_path as _get_project_path
 from ..utils.validation import validate_project_name
+from ..utils.ws_inbox import WebSocketInbox
+from ..utils.ws_stream import forward_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,17 @@ async def cancel_expand_session(project_name: str):
 # ============================================================================
 # WebSocket Endpoint
 # ============================================================================
+
+async def _forward_or_cancel(
+    websocket: WebSocket, inbox: WebSocketInbox, project_name: str, chunks: AsyncGenerator[dict, None]
+) -> bool:
+    """Forward a turn; if the client closed the chat on purpose, stop the turn and close the session."""
+    if await forward_chunks(websocket, chunks, cancel=inbox.client_left):
+        return True
+    if inbox.client_left.is_set():
+        await remove_expand_session(project_name)
+    return False
+
 
 @router.websocket("/ws/{project_name}")
 async def expand_project_websocket(websocket: WebSocket, project_name: str):
@@ -150,12 +163,16 @@ async def expand_project_websocket(websocket: WebSocket, project_name: str):
         return
 
     session: Optional[ExpandChatSession] = None
+    # Read the socket in the background so uvicorn keeps seeing keepalive pongs
+    # while a long Claude turn is streamed from this loop.
+    inbox = WebSocketInbox(websocket)
+    inbox.start()
 
     try:
         while True:
             try:
                 # Receive message from client
-                data = await websocket.receive_text()
+                data = await inbox.receive_text()
                 message = json.loads(data)
                 msg_type = message.get("type")
 
@@ -182,8 +199,8 @@ async def expand_project_websocket(websocket: WebSocket, project_name: str):
                         session = await create_expand_session(project_name, project_dir, mode)
 
                         # Stream the initial greeting
-                        async for chunk in session.start():
-                            await websocket.send_json(chunk)
+                        if not await _forward_or_cancel(websocket, inbox, project_name, session.start()):
+                            break
 
                 elif msg_type == "message":
                     # User sent a message
@@ -222,8 +239,9 @@ async def expand_project_websocket(websocket: WebSocket, project_name: str):
                         continue
 
                     # Stream Claude's response
-                    async for chunk in session.send_message(user_content, attachments if attachments else None):
-                        await websocket.send_json(chunk)
+                    chunks = session.send_message(user_content, attachments if attachments else None)
+                    if not await _forward_or_cancel(websocket, inbox, project_name, chunks):
+                        break
 
                 elif msg_type == "done":
                     # User is done adding features
@@ -260,4 +278,4 @@ async def expand_project_websocket(websocket: WebSocket, project_name: str):
 
     finally:
         # Don't remove the session on disconnect - allow resume
-        pass
+        await inbox.aclose()

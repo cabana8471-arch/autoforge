@@ -66,6 +66,12 @@ export function useExpandChat({
     isCompleteRef.current = isComplete
   }, [isComplete])
 
+  // Read by ws.onclose, which is created once per connection
+  const isLoadingRef = useRef(false)
+  useEffect(() => {
+    isLoadingRef.current = isLoading
+  }, [isLoading])
+
   // Clean up on unmount
   useEffect(() => {
     return () => {
@@ -76,7 +82,7 @@ export function useExpandChat({
         clearTimeout(reconnectTimeoutRef.current)
       }
       if (wsRef.current) {
-        wsRef.current.close()
+        wsRef.current.close(1000) // 1000 = closed on purpose: the server stops a running turn
       }
     }
   }, [])
@@ -117,6 +123,21 @@ export function useExpandChat({
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current)
         pingIntervalRef.current = null
+      }
+
+      // The rest of a response in progress never reaches this page: a new
+      // connection does not re-attach to the turn. Stop "thinking" and say so.
+      if (isLoadingRef.current && !manuallyDisconnectedRef.current) {
+        setIsLoading(false)
+        setMessages((prev) => [
+          ...prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
+          {
+            id: generateId(),
+            role: 'system',
+            content: 'Connection lost while Claude was responding. Claude finishes this response on the server and features it creates are still saved, but the rest of the reply is not shown here.',
+            timestamp: new Date(),
+          },
+        ])
       }
 
       // Don't retry on application-level errors (4xxx codes won't resolve on retry)
@@ -334,7 +355,7 @@ export function useExpandChat({
       reconnectTimeoutRef.current = null
     }
     if (wsRef.current) {
-      wsRef.current.close()
+      wsRef.current.close(1000) // 1000 = closed on purpose: the server stops a running turn
       wsRef.current = null
     }
     setConnectionStatus('disconnected')

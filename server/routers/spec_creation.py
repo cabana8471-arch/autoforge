@@ -7,7 +7,7 @@ WebSocket and REST endpoints for interactive spec creation with Claude.
 
 import json
 import logging
-from typing import Optional
+from typing import AsyncGenerator, AsyncIterator, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
@@ -22,6 +22,8 @@ from ..services.spec_chat_session import (
 )
 from ..utils.project_helpers import get_project_path as _get_project_path
 from ..utils.validation import is_valid_project_name, validate_project_name
+from ..utils.ws_inbox import WebSocketInbox
+from ..utils.ws_stream import forward_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +146,28 @@ async def get_spec_file_status(project_name: str):
 # WebSocket Endpoint
 # ============================================================================
 
+async def _forward_or_cancel(
+    websocket: WebSocket, inbox: WebSocketInbox, project_name: str, chunks: AsyncGenerator[dict, None]
+) -> bool:
+    """Forward a turn; if the client closed the chat on purpose, stop the turn and close the session."""
+    if await forward_chunks(websocket, chunks, cancel=inbox.client_left):
+        return True
+    if inbox.client_left.is_set():
+        await remove_session(project_name)
+    return False
+
+
+async def _with_completion(chunks: AsyncIterator[dict]) -> AsyncGenerator[dict, None]:
+    """Pass chunks through, adding {"type": "complete"} after the response_done of a turn that wrote the spec."""
+    spec_path = None
+    async for chunk in chunks:
+        if chunk.get("type") == "spec_complete":
+            spec_path = chunk.get("path")
+        yield chunk
+        if chunk.get("type") == "response_done" and spec_path is not None:
+            yield {"type": "complete", "path": spec_path}
+
+
 @router.websocket("/ws/{project_name}")
 async def spec_chat_websocket(websocket: WebSocket, project_name: str):
     """
@@ -189,12 +213,16 @@ async def spec_chat_websocket(websocket: WebSocket, project_name: str):
         return
 
     session: Optional[SpecChatSession] = None
+    # Read the socket in the background so uvicorn keeps seeing keepalive pongs
+    # while a long Claude turn is streamed from this loop.
+    inbox = WebSocketInbox(websocket)
+    inbox.start()
 
     try:
         while True:
             try:
                 # Receive message from client
-                data = await websocket.receive_text()
+                data = await inbox.receive_text()
                 message = json.loads(data)
                 msg_type = message.get("type")
 
@@ -206,27 +234,9 @@ async def spec_chat_websocket(websocket: WebSocket, project_name: str):
                     # Create and start a new session
                     session = await create_session(project_name, project_dir)
 
-                    # Track spec completion state
-                    spec_complete_received = False
-                    spec_path = None
-
                     # Stream the initial greeting
-                    async for chunk in session.start():
-                        # Track spec_complete but don't send complete yet
-                        if chunk.get("type") == "spec_complete":
-                            spec_complete_received = True
-                            spec_path = chunk.get("path")
-                            await websocket.send_json(chunk)
-                            continue
-
-                        # When response_done arrives, send complete if spec was done
-                        if chunk.get("type") == "response_done":
-                            await websocket.send_json(chunk)
-                            if spec_complete_received:
-                                await websocket.send_json({"type": "complete", "path": spec_path})
-                            continue
-
-                        await websocket.send_json(chunk)
+                    if not await _forward_or_cancel(websocket, inbox, project_name, _with_completion(session.start())):
+                        break
 
                 elif msg_type == "message":
                     # User sent a message
@@ -264,27 +274,9 @@ async def spec_chat_websocket(websocket: WebSocket, project_name: str):
                         })
                         continue
 
-                    # Track spec completion state
-                    spec_complete_received = False
-                    spec_path = None
-
                     # Stream Claude's response (with attachments if present)
-                    async for chunk in session.send_message(user_content, attachments if attachments else None):
-                        # Track spec_complete but don't send complete yet
-                        if chunk.get("type") == "spec_complete":
-                            spec_complete_received = True
-                            spec_path = chunk.get("path")
-                            await websocket.send_json(chunk)
-                            continue
-
-                        # When response_done arrives, send complete if spec was done
-                        if chunk.get("type") == "response_done":
-                            await websocket.send_json(chunk)
-                            if spec_complete_received:
-                                await websocket.send_json({"type": "complete", "path": spec_path})
-                            continue
-
-                        await websocket.send_json(chunk)
+                    if not await _forward_or_cancel(websocket, inbox, project_name, _with_completion(session.send_message(user_content, attachments if attachments else None))):
+                        break
 
                 elif msg_type == "answer":
                     # User answered a structured question
@@ -311,27 +303,9 @@ async def spec_chat_websocket(websocket: WebSocket, project_name: str):
                     else:
                         user_response = str(answers)
 
-                    # Track spec completion state
-                    spec_complete_received = False
-                    spec_path = None
-
                     # Stream Claude's response
-                    async for chunk in session.send_message(user_response):
-                        # Track spec_complete but don't send complete yet
-                        if chunk.get("type") == "spec_complete":
-                            spec_complete_received = True
-                            spec_path = chunk.get("path")
-                            await websocket.send_json(chunk)
-                            continue
-
-                        # When response_done arrives, send complete if spec was done
-                        if chunk.get("type") == "response_done":
-                            await websocket.send_json(chunk)
-                            if spec_complete_received:
-                                await websocket.send_json({"type": "complete", "path": spec_path})
-                            continue
-
-                        await websocket.send_json(chunk)
+                    if not await _forward_or_cancel(websocket, inbox, project_name, _with_completion(session.send_message(user_response))):
+                        break
 
                 else:
                     await websocket.send_json({
@@ -360,4 +334,4 @@ async def spec_chat_websocket(websocket: WebSocket, project_name: str):
 
     finally:
         # Don't remove the session on disconnect - allow resume
-        pass
+        await inbox.aclose()

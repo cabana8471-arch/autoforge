@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
-from server.routers import assistant_chat as router
 from server.services import assistant_chat_session as svc
+from server.utils.ws_stream import forward_chunks
 
 
 class TextBlock:
@@ -76,7 +76,7 @@ def test_response_persisted_when_websocket_disconnects_mid_stream():
             patch.object(svc, "add_message", lambda _d, _c, role, content: stored.append((role, content))),
             patch.object(svc, "safe_receive_response", _fake_receive(["Hello ", "world", "!"])),
         ):
-            connected = await router._forward_chunks(ws, session.send_message("hi"))
+            connected = await forward_chunks(ws, session.send_message("hi"))
         return connected, ws.sent
 
     connected, sent = asyncio.run(run())
