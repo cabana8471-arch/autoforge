@@ -131,6 +131,7 @@ python -m pytest test_prompt_migrations.py    # Prompt version migrations: idemp
 python -m pytest test_project_layout.py       # No root app_spec.txt copy for new projects
 python -m pytest test_spec_readers_path.py    # Spec readers resolve .autoforge/prompts/
 python -m pytest test_manual_testing.py       # Manual Testing lane: state, blocking, verdict endpoint, MCP tool
+python -m pytest test_feature_update.py        # Editing features, incl. reopening completed ones
 ```
 
 ### React UI

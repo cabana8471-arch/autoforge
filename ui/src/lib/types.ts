@@ -173,6 +173,7 @@ export interface FeatureUpdate {
   steps?: string[]
   priority?: number
   dependencies?: number[]
+  reopen?: boolean  // Move a completed feature back to pending
 }
 
 // Agent types
