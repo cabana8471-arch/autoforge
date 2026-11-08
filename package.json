@@ -35,6 +35,7 @@
     "env_constants.py",
     "parallel_orchestrator.py",
     "progress.py",
+    "project_skills.py",
     "prompts.py",
     "quality_gates.py",
     "registry.py",

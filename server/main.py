@@ -62,6 +62,7 @@ from .routers import (
     schedules_router,
     security_router,
     settings_router,
+    skills_router,
     spec_creation_router,
     templates_router,
     terminal_router,
@@ -225,6 +226,7 @@ app.include_router(documentation_router)
 app.include_router(design_tokens_router)
 app.include_router(visual_regression_router)
 app.include_router(knowledge_router)
+app.include_router(skills_router)
 
 
 # ============================================================================

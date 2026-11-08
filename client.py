@@ -352,6 +352,8 @@ BUILTIN_TOOLS = [
     "Bash",
     "WebFetch",
     "WebSearch",
+    # Lets agents invoke skills installed in the project's .claude/skills/
+    "Skill",
 ]
 
 
@@ -409,6 +411,8 @@ def create_client(
         # Bash permission granted here, but actual commands are validated
         # by the bash_security_hook (see security.py for allowed commands)
         "Bash(*)",
+        # Skills installed in the project's .claude/skills/
+        "Skill",
         # Allow web tools for looking up framework/library documentation
         "WebFetch(*)",
         "WebSearch(*)",

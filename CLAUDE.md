@@ -152,6 +152,7 @@ python -m pytest test_settings_provider_switch.py  # Provider switch resets base
 python -m pytest test_usage_tracker.py        # Token/cost tracking tests
 python -m pytest test_billing_utils.py        # Spend safeguards: billing stop, run cap from usage records, cost of an aborted session
 python -m pytest test_spend_stop_status.py    # Exit codes 3/4 are "stopped" with a reason, never "crashed" (no scheduler restart)
+python -m pytest test_project_skills.py       # Project skills: library (no ~/.claude/skills), install/remove, planted links, Skill tool
 ```
 
 ### React UI
@@ -207,6 +208,7 @@ Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publi
 - `quality_gates.py` - Lint/type-check auto-detection and enforcement before `feature_mark_passing`
 - `usage_tracker.py` - Per-session token/cost recording (from SDK `ResultMessage`) and per-project cost limit enforcement
 - `billing_utils.py` - Spend safeguards: billing-error detection (agents stop instead of retrying, exit code 3), `AUTOFORGE_MAX_BUDGET_USD` run cap (exit code 4); the orchestrator sums its run's `agent_usage` rows, never agent output
+- `project_skills.py` - Skill library (bundled + `~/.autoforge/skills/`) and per-project skill install/remove
 - `api/database.py` - SQLAlchemy models (Feature, Schedule, ScheduleOverride)
 - `api/test_evidence.py` - Test evidence normalization; screenshots copied to `.autoforge/evidence/feature_<id>/`, shown in the feature modal
 - `api/safe_project_io.py` - Reads/writes project files from outside the agent sandbox without following agent-planted symlinks or hard links (dir_fd + O_NOFOLLOW walk, atomic replace); the `*_project_*` helpers (write/append/create-exclusive/mkdirs/read/copy-tree/unlink/remove-tree) raise `OSError` and fall back to a path-based symlink check without dir_fd (Windows). Settings files, configs, lock/drain files, scaffolding, prompt migrations and the layout migration write through them
@@ -240,6 +242,7 @@ The FastAPI server provides REST and WebSocket endpoints for the UI:
 - `schedules.py` - CRUD for time-based agent scheduling
 - `settings.py` - Global settings management (model selection, YOLO, batch size, headless browser)
 - `knowledge.py` - Upload/list/read/delete project knowledge documents (`.autoforge/knowledge/*.md`)
+- `skills.py` - Skill library listing and per-project skill install/remove
 
 **Services** (`server/services/`):
 - `process_manager.py` - Agent process lifecycle management
@@ -535,6 +538,14 @@ Alternative providers are configured via the **Settings UI** (gear icon > API Pr
 ### Agent Session Limits
 
 `max_turns` defaults to 300 for coding/initializer agents and 100 for testing agents. Set `AUTOFORGE_MAX_TURNS` (positive integer) to override it for all agent types.
+
+### Project Skills
+
+Agents load skills from the project's `.claude/skills/` (they run with `setting_sources=["project"]` and have the `Skill` tool).
+- Skills are picked at project creation (New Project > Choose Skills) or later via the wand button next to the agent controls.
+- Library sources, first match wins: `.claude/skills/` (bundled, minus `gsd-to-autoforge-spec`), `~/.autoforge/skills/`. The user's global `~/.claude/skills/` is not a source (user decision 2A). Symlinks inside library skills are not copied; project-side reads/writes/deletes go through `api/safe_project_io`.
+- `playwright-cli` is always installed and cannot be removed.
+- Agents cannot edit `.claude/skills/` (the CLI protects it from Edit and sandboxed Bash, checked live 08.11.2026), so installed skills are read-only references; #314's self-updating `project-learnings` skill was left out.
 
 ### Prompt Loading Fallback Chain
 

@@ -829,3 +829,22 @@ export interface KnowledgeFileContent {
   name: string
   content: string
 }
+
+// ============================================================================
+// Skills
+// ============================================================================
+
+export type SkillSource = 'bundled' | 'user' | 'project'
+
+export interface SkillInfo {
+  name: string
+  description: string
+  source: SkillSource
+  required: boolean
+}
+
+export interface SkillInstallResponse {
+  installed: string[]
+  skipped: string[]
+  skills: SkillInfo[]
+}

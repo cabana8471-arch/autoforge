@@ -40,6 +40,8 @@ import type {
   KnowledgeFileInfo,
   KnowledgeListResponse,
   KnowledgeFileContent,
+  SkillInfo,
+  SkillInstallResponse,
 } from './types'
 
 const API_BASE = '/api'
@@ -80,11 +82,12 @@ export async function listProjects(): Promise<ProjectSummary[]> {
 export async function createProject(
   name: string,
   path: string,
-  specMethod: 'claude' | 'manual' = 'manual'
+  specMethod: 'claude' | 'manual' = 'manual',
+  skills: string[] = []
 ): Promise<ProjectSummary> {
   return fetchJSON('/projects', {
     method: 'POST',
-    body: JSON.stringify({ name, path, spec_method: specMethod }),
+    body: JSON.stringify({ name, path, spec_method: specMethod, skills }),
   })
 }
 
@@ -96,6 +99,35 @@ export async function importProject(
     method: 'POST',
     body: JSON.stringify({ name, path }),
   })
+}
+
+// ============================================================================
+// Skills API
+// ============================================================================
+
+export async function listSkillLibrary(): Promise<SkillInfo[]> {
+  return fetchJSON('/skills')
+}
+
+export async function listProjectSkills(projectName: string): Promise<SkillInfo[]> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/skills`)
+}
+
+export async function installProjectSkills(
+  projectName: string,
+  names: string[]
+): Promise<SkillInstallResponse> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/skills`, {
+    method: 'POST',
+    body: JSON.stringify({ names }),
+  })
+}
+
+export async function removeProjectSkill(projectName: string, skillName: string): Promise<void> {
+  await fetchJSON(
+    `/projects/${encodeURIComponent(projectName)}/skills/${encodeURIComponent(skillName)}`,
+    { method: 'DELETE' }
+  )
 }
 
 export async function getProject(name: string): Promise<ProjectDetail> {
