@@ -370,12 +370,29 @@ test.describe('Conversation History Integration', () => {
   // --------------------------------------------------------------------------
   // Full flow test
   // --------------------------------------------------------------------------
-  test('Full conversation flow: create, persist, switch conversations', async ({ page }) => {
-    const hasProject = await selectProject(page)
-    if (!hasProject) {
-      test.skip(true, 'No projects available')
-      return
+  // A project of its own: on a shared project the history fills up with earlier runs'
+  // conversations and the close/reopen and switch steps become unreliable.
+  let ownProject: string | null = null
+  test.afterEach(async ({ request }) => {
+    if (ownProject) {
+      await request.delete(`/api/projects/${ownProject}`)
+      ownProject = null
     }
+  })
+
+  test('Full conversation flow: create, persist, switch conversations', async ({ page, request }) => {
+    const projectsDir = process.env.E2E_PROJECTS_DIR
+    test.skip(!projectsDir, 'E2E_PROJECTS_DIR is not set (see import-and-backlog.spec.ts)')
+    const name = `e2e-chat-${Date.now().toString(36)}`
+    const created = await request.post('/api/projects', {
+      data: { name, path: `${projectsDir}/${name}`, spec_method: 'manual' },
+    })
+    expect(created.ok(), await created.text()).toBeTruthy()
+    ownProject = name
+
+    await page.goto('/')  // the list was loaded before the project existed
+    await page.locator('button:has-text("Select Project")').click()
+    await page.locator(`[role="menuitem"][title$="/${name}"]`).click()
 
     await page.keyboard.press('a')
     await waitForPanelOpen(page)
@@ -436,9 +453,8 @@ test.describe('Conversation History Integration', () => {
     await expect(page.locator('h3:has-text("Conversation History")')).toBeVisible()
 
     const conversationItems = page.getByTestId('conversation-history').getByTestId('conversation-item')
-    const count = await conversationItems.count()
-    console.log(`Found ${count} conversations`)
-    expect(count).toBeGreaterThanOrEqual(2)
+    // The list refetches when it opens; wait for it instead of counting the cached one
+    await expect.poll(() => conversationItems.count()).toBeGreaterThanOrEqual(2)
 
     // STEP 6: Switch to first conversation
     console.log('STEP 6: Switch conversation')
