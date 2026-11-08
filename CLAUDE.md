@@ -126,7 +126,7 @@ python -m pytest test_file_state_guard.py     # Stale-read Write/Edit loop guard
 python -m pytest test_database_journal.py     # SQLite journal mode / WAL fallback tests
 python -m pytest test_expand_chat_session.py  # Expand chat: created-feature events, tool permissions
 python -m pytest test_subprocess_encoding.py  # Subprocess UTF-8 encoding tests
-python -m pytest test_prompts.py              # Prompt assembly tests (regression-script injection)
+python -m pytest test_prompts.py              # Prompt assembly (regression scripts) + CLI verification template/migration
 python -m pytest test_prompt_migrations.py    # Prompt version migrations: idempotent, custom prompts untouched
 python -m pytest test_project_layout.py       # No root app_spec.txt copy for new projects
 python -m pytest test_spec_readers_path.py    # Spec readers resolve .autoforge/prompts/

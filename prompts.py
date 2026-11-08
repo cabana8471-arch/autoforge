@@ -17,7 +17,7 @@ from pathlib import Path
 TEMPLATES_DIR = Path(__file__).parent / ".claude" / "templates"
 
 # Migration version — bump when adding new migration steps
-CURRENT_MIGRATION_VERSION = 3
+CURRENT_MIGRATION_VERSION = 4
 
 
 def get_project_prompts_dir(project_dir: Path) -> Path:
@@ -183,7 +183,13 @@ REGRESSION_TESTS_DIR = "tests/regression"
 REGRESSION_SCRIPT_CODING_SECTION = f"""### STEP 5.8: SAVE A REGRESSION TEST SCRIPT (MANDATORY)
 
 Testing agents re-verify passing features later. Re-testing by hand in the browser costs a full
-agent session every time, so capture your verification as a script they can simply run:
+agent session every time, so capture your verification as a script they can simply run.
+
+**Features without a browser UI** (CLI tools, scripts, libraries, API-only services): the bash
+scenario script `tests/feature_<id>_test.sh` you saved while verifying is the regression script.
+Make sure it is committed and skip the Playwright steps below.
+
+**Web UI features:**
 
 1. Write `{REGRESSION_TESTS_DIR}/feature-<ID>.spec.ts` (or `.spec.js` if the project does not use
    TypeScript) -- one file per feature, named with the feature's numeric ID.
@@ -207,26 +213,29 @@ def _regression_script_testing_header() -> str:
     """Header prepended to testing prompts: run saved scripts before manual testing."""
     return f"""## SCRIPTED REGRESSION TESTS (RUN THESE FIRST)
 
-Each feature should have a regression script at `{REGRESSION_TESTS_DIR}/feature-<ID>.spec.ts`
-(or `.spec.js`), written by the agent that built it. Running a script is far cheaper than
-re-testing by hand, so for EACH assigned feature:
+Each feature should have a regression script written by the agent that built it: a Playwright
+test at `{REGRESSION_TESTS_DIR}/feature-<ID>.spec.ts` (or `.spec.js`) for web UI features, or a
+bash scenario script at `tests/feature_<ID>_test.sh` for features without a browser UI. Running a
+script is far cheaper than re-testing by hand, so for EACH assigned feature:
 
 1. Make sure the app is running (run `./init.sh` if it exists and the server is down).
-2. Look for the script: `ls {REGRESSION_TESTS_DIR}/feature-<ID>.spec.*`
+2. Look for the script: `ls {REGRESSION_TESTS_DIR}/feature-<ID>.spec.* tests/feature_<ID>_test.sh`
 3. **Script exists:** run it:
    `npx playwright test {REGRESSION_TESTS_DIR}/feature-<ID>.spec.ts --reporter=line`
+   or `bash tests/feature_<ID>_test.sh`
    - **Passes:** the feature still works. Move on to the next feature and skip the manual
      browser steps below (no snapshots, no screenshots).
    - **Fails:** read the failure output. If the app is broken, it is a regression: follow the
      "If the feature FAILS" steps below, then re-run the script until it passes. If the script
      itself is wrong (e.g. a stale selector after an intentional UI change), verify the feature
      manually in the browser, fix the script, and commit it.
-4. **No script:** verify the feature manually with the browser steps below, then write the
-   missing script (Playwright test, headless, `BASE_URL` env var with the dev server URL as
-   default, unique self-cleaning test data, auto-waiting assertions). Confirm it passes and
-   commit it so the next regression run is cheap.
+4. **No script:** verify the feature manually with the steps below, then write the missing
+   script: for web UI a Playwright test (headless, `BASE_URL` env var with the dev server URL
+   as default, unique self-cleaning test data, auto-waiting assertions); otherwise the bash
+   scenario script described in STEP 2B. Confirm it passes and commit it so the next
+   regression run is cheap.
 
-The manual browser workflow below applies only when a script is missing or failing.
+The manual verification workflow below applies only when a script is missing or failing.
 
 ---
 
@@ -809,6 +818,18 @@ Use `playwright-cli` commands for browser interaction. Key commands:
 """
 
 
+def _apply_replacements(content: str, replacements) -> str:
+    """Apply exact-text (old, new) replacements, skipping any whose new text is already there.
+
+    Some new texts start with their old text, so a plain replace would apply them
+    again on every run.
+    """
+    for old, new in replacements:
+        if new not in content:
+            content = content.replace(old, new)
+    return content
+
+
 # v2 -> v3: exact-text replacements that point screenshots at .autoforge/validation/.
 # Only default template wording is matched, so customized prompts are left untouched.
 _VALIDATION_CODING_REPLACEMENTS: list[tuple[str, str]] = [
@@ -1099,17 +1120,102 @@ def _migrate_v2_to_v3(project_dir: Path) -> list[str]:
             continue
         try:
             content = prompt_path.read_text(encoding="utf-8")
-            updated = content
-            for old, new in replacements:
-                # Some new texts start with the old one: skip them once applied
-                if new not in updated:
-                    updated = updated.replace(old, new)
+            updated = _apply_replacements(content, replacements)
             if updated != content:
                 prompt_path.write_text(updated, encoding="utf-8")
                 migrated.append(f"Updated {filename} to save screenshots in .autoforge/validation/")
         except (OSError, PermissionError) as e:
             print(f"  Warning: Could not update {filename}: {e}")
 
+    return migrated
+
+
+# v3 -> v4: phrases from the browser-only testing prompt and their replacements
+# (browser or command-line verification). Only exact matches are replaced, so
+# user-customized wording is left untouched.
+_V4_TESTING_PHRASES = (
+    (
+        "3. Test the feature in the browser\n",
+        "3. Test the feature the way a real user would (browser for web UIs, bash for CLIs/scripts/libraries)\n",
+    ),
+    (
+        "**Quality Bar:**\n- Zero console errors\n- All verification steps pass\n"
+        "- Visual appearance correct\n- API calls succeed\n",
+        "**Quality Bar:**\n- All verification steps pass\n"
+        "- Web UI: zero console errors, visual appearance correct, API calls succeed\n"
+        "- CLI / non-UI: expected exit codes, expected stdout/stderr, correct side effects, "
+        "clean failure on invalid input\n",
+    ),
+    (
+        "3. Verify the fix with browser automation\n",
+        "3. Verify the fix with browser automation (web UI) or your scenario script (CLI / non-UI)\n",
+    ),
+)
+
+
+def _get_template_section(name: str, start_pattern: str, end_pattern: str) -> str | None:
+    """Return the section of a base template from start_pattern up to (not including) end_pattern."""
+    template_path = TEMPLATES_DIR / f"{name}.template.md"
+    try:
+        template = template_path.read_text(encoding="utf-8")
+    except (OSError, PermissionError):
+        return None
+    match = re.search(f"{start_pattern}.*?(?={end_pattern})", template, flags=re.DOTALL)
+    return match.group(0) if match else None
+
+
+# The browser-unavailable note added to the testing template's STEP 2 in 688e724.
+# Projects scaffolded before it have STEP 2 without the note.
+_BROWSER_UNAVAILABLE_NOTE = (
+    "**If the browser cannot be opened or a verification step cannot be executed, you have NOT verified "
+    "the feature.** Never assume it still works. Fix the cause (e.g. start the dev server, retry "
+    "`playwright-cli open`); if it is still impossible, do not call `feature_mark_passing` or "
+    "`feature_mark_failing` -- document the exact error in `claude-progress.txt` and end the session."
+)
+
+
+def _pre_v4_testing_step2_variants() -> list[str]:
+    """Default testing-prompt STEP 2 texts before v4: with/without the note, after/before v3."""
+    anchor = "5. Check for console errors\n\n"
+    with_note = _CLI_TESTING_STEP2.replace(anchor, anchor + _BROWSER_UNAVAILABLE_NOTE + "\n\n", 1)
+    raw = [_CLI_TESTING_STEP2, with_note]
+    return [_apply_replacements(step2, _VALIDATION_TESTING_REPLACEMENTS) for step2 in raw] + raw
+
+
+def _migrate_testing_prompt_to_v4(content: str) -> str:
+    """Add command-line verification guidance for non-web projects to a testing prompt.
+
+    The STEP 2 section is only replaced when it is an unmodified default (browser-only)
+    text, so project-specific customizations are preserved.
+    """
+    new_step2 = _get_template_section("testing_prompt", r"### STEP 2: VERIFY THE FEATURE", r"### STEP 3:")
+    if new_step2:
+        for old_step2 in _pre_v4_testing_step2_variants():
+            if old_step2 in content:
+                content = content.replace(old_step2, new_step2, 1)
+                break
+
+    for old_phrase, new_phrase in _V4_TESTING_PHRASES:
+        content = content.replace(old_phrase, new_phrase, 1)
+
+    return content
+
+
+def _migrate_v3_to_v4(project_dir: Path) -> list[str]:
+    """Migrate from v3 to v4: testing_prompt.md supports CLI / non-web verification (issue #136)."""
+    migrated: list[str] = []
+    testing_prompt_path = get_project_prompts_dir(project_dir) / "testing_prompt.md"
+    # Never write through a symlink the agent may have planted in the project
+    if testing_prompt_path.is_symlink() or not testing_prompt_path.exists():
+        return migrated
+    try:
+        content = testing_prompt_path.read_text(encoding="utf-8")
+        updated = _migrate_testing_prompt_to_v4(content)
+        if updated != content:
+            testing_prompt_path.write_text(updated, encoding="utf-8")
+            migrated.append("Updated testing_prompt.md with command-line verification for non-web projects")
+    except (OSError, PermissionError) as e:
+        print(f"  Warning: Could not update testing_prompt.md: {e}")
     return migrated
 
 
@@ -1134,7 +1240,10 @@ def migrate_project_to_current(project_dir: Path) -> list[str]:
     if current < 3:
         migrated.extend(_migrate_v2_to_v3(project_dir))
 
-    # Future: if current < 4: migrated.extend(_migrate_v3_to_v4(project_dir))
+    if current < 4:
+        migrated.extend(_migrate_v3_to_v4(project_dir))
+
+    # Future: if current < 5: migrated.extend(_migrate_v4_to_v5(project_dir))
 
     _set_migration_version(project_dir, CURRENT_MIGRATION_VERSION)
     return migrated

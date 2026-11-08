@@ -11,8 +11,10 @@ place, once, on the next agent start. Each one must:
 
 v2 (#292): scaffold ``.autoforge/allowed_commands.yaml``.
 v3 (#289): screenshots go to ``.autoforge/validation/``.
+v4 (#333): testing prompt verifies CLI / non-web features through bash.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -184,3 +186,110 @@ class TestMigrationChain:
             assert old in coding, old
         for old, _ in prompts._VALIDATION_TESTING_REPLACEMENTS:
             assert old in testing, old
+
+
+# ---------------------------------------------------------------------------
+# v4: command-line verification in the testing prompt
+# ---------------------------------------------------------------------------
+
+STEP2_RE = re.compile(r"### STEP 2: VERIFY THE FEATURE.*?(?=### STEP 3:)", re.DOTALL)
+BROWSER_NOTE_ANCHOR = "5. Check for console errors\n\n"
+
+
+def _undo(content: str, replacements) -> str:
+    for old, new in replacements:
+        assert new in content, f"template no longer contains:\n{new}"
+        content = content.replace(new, old)
+    return content
+
+
+def _v3(text: str) -> str:
+    for old, new in prompts._VALIDATION_TESTING_REPLACEMENTS:
+        if new not in text:
+            text = text.replace(old, new)
+    return text
+
+
+def _browser_note() -> str:
+    template = (TEMPLATES_DIR / "testing_prompt.template.md").read_text(encoding="utf-8")
+    return next(line for line in template.splitlines() if line.startswith("**If the browser cannot be opened"))
+
+
+def _old_testing_prompt(step2: str, undo_v3: bool) -> str:
+    """The current template with v4 (and optionally v3) undone and STEP 2 swapped for an older default."""
+    content = (TEMPLATES_DIR / "testing_prompt.template.md").read_text(encoding="utf-8")
+    content = _undo(content, prompts._V4_TESTING_PHRASES)
+    if undo_v3:
+        content = _undo(content, prompts._VALIDATION_TESTING_REPLACEMENTS)
+    return STEP2_RE.sub(lambda _m: step2, content, count=1)
+
+
+V1_STEP2 = prompts._CLI_TESTING_STEP2
+V1_STEP2_WITH_NOTE = V1_STEP2.replace(BROWSER_NOTE_ANCHOR, BROWSER_NOTE_ANCHOR + "{note}\n\n", 1)
+
+
+@pytest.fixture(params=["my-features-template", "with-browser-note"])
+def pre_v4_project(request, tmp_path: Path) -> Path:
+    step2 = V1_STEP2 if request.param == "my-features-template" else V1_STEP2_WITH_NOTE.format(note=_browser_note())
+    testing = _old_testing_prompt(_v3(step2), undo_v3=False)
+    return _project_at(tmp_path, 3, CUSTOM_CODING, testing)
+
+
+def _testing_prompt(project: Path) -> str:
+    return (project / ".autoforge" / "prompts" / "testing_prompt.md").read_text(encoding="utf-8")
+
+
+class TestV4CliVerification:
+    def test_current_version_is_at_least_4(self):
+        assert CURRENT_MIGRATION_VERSION >= 4
+
+    def test_v1_step2_anchor_exists(self):
+        assert BROWSER_NOTE_ANCHOR in V1_STEP2
+
+    def test_default_testing_prompt_converges_on_current_template(self, pre_v4_project: Path):
+        assert "#### 2B:" not in _testing_prompt(pre_v4_project)
+
+        assert prompts._migrate_v3_to_v4(pre_v4_project)
+
+        template = (TEMPLATES_DIR / "testing_prompt.template.md").read_text(encoding="utf-8")
+        assert _testing_prompt(pre_v4_project) == template
+
+    def test_second_run_changes_nothing(self, pre_v4_project: Path):
+        assert prompts._migrate_v3_to_v4(pre_v4_project)
+        before = _snapshot(pre_v4_project)
+
+        assert prompts._migrate_v3_to_v4(pre_v4_project) == []
+        assert _snapshot(pre_v4_project) == before
+
+    def test_custom_prompts_untouched(self, tmp_path: Path):
+        project = _project_at(tmp_path, 3, CUSTOM_CODING, CUSTOM_TESTING)
+
+        assert prompts._migrate_v3_to_v4(project) == []
+        assert _testing_prompt(project) == CUSTOM_TESTING
+
+    def test_symlinked_prompt_is_not_written_through(self, tmp_path: Path, pre_v4_project: Path):
+        outside = tmp_path.parent / f"{tmp_path.name}-outside-testing.md"
+        testing = pre_v4_project / ".autoforge" / "prompts" / "testing_prompt.md"
+        outside.write_text(testing.read_text(encoding="utf-8"), encoding="utf-8")
+        original = outside.read_text(encoding="utf-8")
+        testing.unlink()
+        testing.symlink_to(outside)
+
+        prompts._migrate_v3_to_v4(pre_v4_project)
+
+        assert outside.read_text(encoding="utf-8") == original
+
+
+class TestFullChainFromMyFeatures:
+    def test_v1_project_reaches_current_testing_template(self, tmp_path: Path):
+        """A project scaffolded from my-features' templates (v1 STEP 2, no v3/v4 wording)."""
+        testing = _old_testing_prompt(V1_STEP2, undo_v3=True)
+        project = _project_at(tmp_path, 1, CUSTOM_CODING, testing)
+
+        migrate_project_to_current(project)
+
+        template = (TEMPLATES_DIR / "testing_prompt.template.md").read_text(encoding="utf-8")
+        assert _testing_prompt(project) == template
+        before = _snapshot(project)
+        assert migrate_project_to_current(project) == []
+        assert _snapshot(project) == before

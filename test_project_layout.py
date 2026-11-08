@@ -76,7 +76,7 @@ def test_template_spec_mentions_all_use_autoforge_path():
     """Every app_spec.txt mention points at .autoforge/prompts/, never the project root."""
     import re
 
-    for name in ("initializer_prompt.template.md", "coding_prompt.template.md"):
+    for name in ("initializer_prompt.template.md", "coding_prompt.template.md", "testing_prompt.template.md"):
         content = (TEMPLATES_DIR / name).read_text(encoding="utf-8")
         bare = [
             content[max(0, m.start() - 40):m.end()]
