@@ -6,6 +6,7 @@ FastAPI routers for different API endpoints.
 """
 
 from .agent import router as agent_router
+from .allowed_commands import router as allowed_commands_router
 from .assistant_chat import router as assistant_chat_router
 from .cicd import router as cicd_router
 from .design_tokens import router as design_tokens_router
@@ -59,4 +60,5 @@ __all__ = [
     "skills_router",
     "github_router",
     "git_push_router",
+    "allowed_commands_router",
 ]

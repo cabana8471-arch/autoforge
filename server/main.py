@@ -44,6 +44,7 @@ from api.safe_project_io import UnsafeProjectPathError
 
 from .routers import (
     agent_router,
+    allowed_commands_router,
     assistant_chat_router,
     cicd_router,
     design_tokens_router,
@@ -231,6 +232,7 @@ app.include_router(knowledge_router)
 app.include_router(skills_router)
 app.include_router(github_router)
 app.include_router(git_push_router)
+app.include_router(allowed_commands_router)
 
 
 # ============================================================================

@@ -135,8 +135,8 @@ export function DeniedCommandsDialog({ isOpen, projectName, onClose }: DeniedCom
 
         {allowable.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            Copy the allowlist snippet and merge it into{' '}
-            <code className="font-mono">.autoforge/allowed_commands.yaml</code> in the project folder.
+            Copy the allowlist snippet and merge it into the project's allowlist in Settings &gt; Allowed
+            Commands (<code className="font-mono">.autoforge/allowed_commands.yaml</code>).
             Review each command before allowing it.
           </p>
         )}

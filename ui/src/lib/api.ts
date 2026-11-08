@@ -48,6 +48,7 @@ import type {
   SkillInfo,
   GitPushStatus,
   SkillInstallResponse,
+  AllowedCommandsFile,
 } from './types'
 
 const API_BASE = '/api'
@@ -786,5 +787,20 @@ export async function updateGitPush(projectName: string, enabled: boolean): Prom
   return fetchJSON(`/projects/${encodeURIComponent(projectName)}/git-push`, {
     method: 'PUT',
     body: JSON.stringify({ enabled }),
+  })
+}
+
+// ============================================================================
+// Project allowlist API (.autoforge/allowed_commands.yaml)
+// ============================================================================
+
+export async function getAllowedCommands(projectName: string): Promise<AllowedCommandsFile> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/allowed-commands`)
+}
+
+export async function updateAllowedCommands(projectName: string, content: string): Promise<AllowedCommandsFile> {
+  return fetchJSON(`/projects/${encodeURIComponent(projectName)}/allowed-commands`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
   })
 }

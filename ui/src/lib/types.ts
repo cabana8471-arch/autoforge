@@ -957,3 +957,10 @@ export interface GitPushStatus {
   current_url: string | null  // What `git remote get-url <remote>` says now
   unsafe_config: string[]     // Repo-local git config keys that block the push
 }
+
+// Project allowlist file (.autoforge/allowed_commands.yaml), edited in Settings
+export interface AllowedCommandsFile {
+  exists: boolean
+  content: string
+  path: string  // Project-relative file the security hook reads
+}

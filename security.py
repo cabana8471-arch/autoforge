@@ -830,6 +830,9 @@ def cli_absolute_rule(tool: str, path: PurePath, suffix: str = "") -> str:
     return f"{tool}(/{posix}{suffix})"
 
 
+MAX_PROJECT_COMMANDS = 100
+
+
 def load_project_commands(project_dir: Path) -> Optional[dict]:
     """
     Load allowed commands from project-specific YAML config.
@@ -875,7 +878,7 @@ def load_project_commands(project_dir: Path) -> Optional[dict]:
         commands = config.get("commands", [])
 
         # Enforce 100 command limit
-        if isinstance(commands, list) and len(commands) > 100:
+        if isinstance(commands, list) and len(commands) > MAX_PROJECT_COMMANDS:
             logger.warning(f"Project config at {config_path} exceeds 100 command limit ({len(commands)} commands)")
             return None
 
@@ -898,6 +901,46 @@ def load_project_commands(project_dir: Path) -> Optional[dict]:
     except (IOError, OSError) as e:
         logger.warning(f"Failed to read project config at {config_path}: {e}")
         return None
+
+
+def validate_project_config_text(text: str) -> list[str]:
+    """
+    Check an allowed_commands.yaml text before the server saves it (UI editor).
+
+    Applies the rules of load_project_commands() and validate_project_command(),
+    so a saved file is loaded as written and no entry is silently dropped.
+
+    Returns:
+        Human-readable errors; empty when the text is valid. A file holding only
+        comments is valid (no project commands).
+    """
+    try:
+        config = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        return [f"Invalid YAML: {e}"]
+    if config is None:
+        return []
+    if not isinstance(config, dict):
+        return ["The file must be a YAML mapping with 'version' and 'commands'"]
+
+    errors: list[str] = []
+    if "version" not in config:
+        errors.append("Missing required 'version' field (use 'version: 1')")
+
+    commands = config.get("commands", [])
+    if not isinstance(commands, list):
+        errors.append("'commands' must be a list")
+    else:
+        if len(commands) > MAX_PROJECT_COMMANDS:
+            errors.append(f"At most {MAX_PROJECT_COMMANDS} commands are allowed ({len(commands)} given)")
+        for i, cmd in enumerate(commands):
+            valid, error = validate_project_command(cmd)
+            if not valid:
+                errors.append(f"commands[{i}]: {error}")
+
+    if _validate_pkill_processes(config, Path("allowed_commands.yaml")) is None:
+        errors.append("'pkill_processes' must be a list of process names (letters, digits, '.', '_', '-')")
+    return errors
 
 
 def validate_project_command(cmd_config: dict) -> tuple[bool, str]:

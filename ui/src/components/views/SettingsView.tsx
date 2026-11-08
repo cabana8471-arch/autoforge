@@ -13,6 +13,7 @@ import { useTheme, THEMES } from '@/hooks/useTheme'
 import type { EffortLevel, Maturity, ProviderInfo } from '@/lib/types'
 import { MaturityOrderSetting } from '@/components/MaturityOrderSetting'
 import { GitAutoPushCard } from '@/components/GitAutoPushCard'
+import { AllowedCommandsCard } from '@/components/AllowedCommandsCard'
 import { useAppContext } from '@/contexts/AppContext'
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
@@ -630,6 +631,9 @@ export function SettingsView() {
 
             {/* Per-project git auto-push */}
             <GitAutoPushCard projectName={selectedProject} />
+
+            {/* Per-project command allowlist; keyed so edits never carry over to another project */}
+            <AllowedCommandsCard key={selectedProject ?? ''} projectName={selectedProject} />
 
             {/* Update Error */}
             {updateSettings.isError && (
