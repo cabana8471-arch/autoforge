@@ -299,6 +299,7 @@ CODING_AGENT_TOOLS = [
     "mcp__features__feature_clear_in_progress",
     "mcp__features__feature_verify_quality",
     "mcp__features__feature_report_failure",
+    "mcp__features__feature_mark_needs_manual_testing",
 ]
 
 TESTING_AGENT_TOOLS = [

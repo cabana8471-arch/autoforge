@@ -130,6 +130,7 @@ python -m pytest test_prompts.py              # Prompt assembly (regression scri
 python -m pytest test_prompt_migrations.py    # Prompt version migrations: idempotent, custom prompts untouched
 python -m pytest test_project_layout.py       # No root app_spec.txt copy for new projects
 python -m pytest test_spec_readers_path.py    # Spec readers resolve .autoforge/prompts/
+python -m pytest test_manual_testing.py       # Manual Testing lane: state, blocking, verdict endpoint, MCP tool
 ```
 
 ### React UI
@@ -258,6 +259,7 @@ MCP tools available to the agent:
 - `feature_set_dependencies` - Set all dependencies for a feature at once
 - `feature_verify_quality` - Run lint/type-check quality gates and store the result on the feature
 - `feature_report_failure` - Record why a feature attempt failed (increments `failure_count`)
+- `feature_mark_needs_manual_testing` - Hand a code-complete feature the agent cannot verify (e.g. native mobile app) to the Manual Testing lane; its dependents stay blocked until a human marks it passed
 
 #### Quality Gates
 

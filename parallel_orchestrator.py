@@ -459,7 +459,7 @@ class ParallelOrchestrator:
 
                 for cid in candidate_ids:
                     cf = feature_map.get(cid)
-                    if not cf or cf.get("passes") or cf.get("in_progress"):
+                    if not cf or cf.get("passes") or cf.get("in_progress") or cf.get("needs_manual_testing"):
                         continue
                     # Check if ALL deps are satisfied by simulated passing set
                     deps = cf.get("dependencies") or []
@@ -530,8 +530,8 @@ class ParallelOrchestrator:
         for fd in feature_dicts:
             if not fd.get("in_progress") or fd.get("passes"):
                 continue
-            # Skip if blocked for human input
-            if fd.get("needs_human_input"):
+            # Skip if blocked for human input or awaiting manual testing
+            if fd.get("needs_human_input") or fd.get("needs_manual_testing"):
                 continue
             # Skip if already running in this orchestrator instance
             if fd["id"] in running_ids:
@@ -577,13 +577,17 @@ class ParallelOrchestrator:
                 running_ids.update(batch_ids)
 
         ready = []
-        skipped_reasons = {"passes": 0, "in_progress": 0, "running": 0, "failed": 0, "deps": 0, "needs_human_input": 0}
+        skipped_reasons = {"passes": 0, "in_progress": 0, "running": 0, "failed": 0, "deps": 0, "needs_human_input": 0,
+                           "needs_manual_testing": 0}
         for fd in feature_dicts:
             if fd.get("passes"):
                 skipped_reasons["passes"] += 1
                 continue
             if fd.get("needs_human_input"):
                 skipped_reasons["needs_human_input"] += 1
+                continue
+            if fd.get("needs_manual_testing"):
+                skipped_reasons["needs_manual_testing"] += 1
                 continue
             if fd.get("in_progress"):
                 skipped_reasons["in_progress"] += 1
@@ -645,11 +649,15 @@ class ParallelOrchestrator:
 
         passing_count = 0
         failed_count = 0
+        manual_testing_count = 0
         pending_count = 0
         for fd in feature_dicts:
             if fd.get("passes"):
                 passing_count += 1
                 continue  # Completed successfully
+            if fd.get("needs_manual_testing"):
+                manual_testing_count += 1
+                continue  # Code complete, waiting on a human - nothing left for agents
             if self._failure_counts.get(fd["id"], 0) >= MAX_FEATURE_RETRIES:
                 failed_count += 1
                 continue  # Permanently failed, count as "done"
@@ -658,7 +666,8 @@ class ParallelOrchestrator:
         total = len(feature_dicts)
         is_complete = pending_count == 0
         debug_log.log("COMPLETE_CHECK", f"get_all_complete: {passing_count}/{total} passing, "
-            f"{failed_count} failed, {pending_count} pending -> {is_complete}")
+            f"{failed_count} failed, {manual_testing_count} awaiting manual testing, "
+            f"{pending_count} pending -> {is_complete}")
         return is_complete
 
     def get_stall_state(self, feature_dicts: list[dict]) -> str:
@@ -669,7 +678,7 @@ class ParallelOrchestrator:
         Returns:
             "work" - a feature is ready or resumable after all (stale snapshot)
             "testing" - testing agents are still running and may flip features back to failing
-            "human_input" - remaining work is waiting on a human response
+            "human_input" - remaining work is waiting on a human response or manual test
             "blocked" - remaining features can never become ready in this run
         """
         if self.get_resumable_features(feature_dicts) or self.get_ready_features(feature_dicts):
@@ -677,9 +686,26 @@ class ParallelOrchestrator:
         with self._lock:
             if self.running_testing_agents:
                 return "testing"
-        if any(not fd.get("passes") and fd.get("needs_human_input") for fd in feature_dicts):
+        if any(
+            not fd.get("passes") and (fd.get("needs_human_input") or fd.get("needs_manual_testing"))
+            for fd in feature_dicts
+        ):
             return "human_input"
         return "blocked"
+
+    def completion_message(self, feature_dicts: list[dict]) -> str:
+        """Message printed when no agent work is left (see get_all_complete).
+
+        Features awaiting manual testing count as done for the agents, but they
+        still wait on the user, so the message must not claim everything is complete.
+        """
+        manual = sum(1 for fd in feature_dicts if not fd.get("passes") and fd.get("needs_manual_testing"))
+        if manual == 0:
+            return "All features complete!"
+        return (
+            f"All agent work is done; {manual} feature(s) wait for manual testing. "
+            "Mark them passed or failed in the Manual Testing lane, then restart the agent if any failed."
+        )
 
     def get_passing_count(self, feature_dicts: list[dict] | None = None) -> int:
         """Get the number of passing features.
@@ -1520,7 +1546,8 @@ class ParallelOrchestrator:
             )
         lines.append(
             "To unblock: fix or remove the listed dependencies, answer pending human-input "
-            "requests, or restart the agent to retry failed features."
+            "requests, test the features in the Manual Testing lane, or restart the agent "
+            "to retry failed features."
         )
         report = "\n".join(lines)
 
@@ -1669,7 +1696,7 @@ class ParallelOrchestrator:
             try:
                 # Check if all complete
                 if self.get_all_complete(feature_dicts):
-                    print("\nAll features complete!", flush=True)
+                    print(f"\n{self.completion_message(feature_dicts)}", flush=True)
                     break
 
                 # --- Graceful pause (drain mode) ---
@@ -1769,7 +1796,7 @@ class ParallelOrchestrator:
 
                         # Recheck if all features are now complete
                         if self.get_all_complete(fresh_dicts):
-                            print("\nAll features complete!", flush=True)
+                            print(f"\n{self.completion_message(fresh_dicts)}", flush=True)
                             break
 
                         stall = self.get_stall_state(fresh_dicts)

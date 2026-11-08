@@ -198,6 +198,17 @@ passing: fix the reported errors and call it again. You can run the same checks 
 
 **NEVER mark a feature passing if you implemented only part of it or skipped any of its steps. Use `feature_split` instead.**
 
+**If the code is complete but you cannot verify it in this environment** (e.g. a native
+iOS/Android app that needs Xcode, a simulator or a device), do NOT leave the feature
+in limbo. Hand it off to a human instead:
+
+```
+Use the feature_mark_needs_manual_testing tool with feature_id=42 and notes="<steps the human should follow and what to check>"
+```
+
+The feature then appears in the "Manual Testing" lane of the UI for a human to mark
+passed or failed. Never use this to skip testing you are able to do yourself.
+
 ### STEP 7: COMMIT YOUR PROGRESS
 
 Make a descriptive git commit.
@@ -292,6 +303,9 @@ feature_report_failure with feature_id={id} and reason="..."
 
 # 10. Split a feature that is too large into smaller sub-features
 feature_split with feature_id={id}, sub_features=[...], reason="..."
+
+# 11. Hand off a code-complete feature you cannot verify (e.g. native mobile app)
+feature_mark_needs_manual_testing with feature_id={id} and notes="<what to test>"
 ```
 
 ### RULES:

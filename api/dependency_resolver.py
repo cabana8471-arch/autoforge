@@ -375,7 +375,7 @@ def get_ready_features(features: list[dict], limit: int = 10) -> list[dict]:
 
     ready = []
     for f in features:
-        if f.get("passes") or f.get("in_progress"):
+        if f.get("passes") or f.get("in_progress") or f.get("needs_manual_testing"):
             continue
         deps = f.get("dependencies") or []
         if all(dep_id in passing_ids for dep_id in deps):
@@ -401,7 +401,7 @@ def get_blocked_features(features: list[dict]) -> list[dict]:
 
     blocked = []
     for f in features:
-        if f.get("passes"):
+        if f.get("passes") or f.get("needs_manual_testing"):
             continue
         deps = f.get("dependencies") or []
         blocking = [d for d in deps if d not in passing_ids]
@@ -523,6 +523,7 @@ def explain_stalled_features(
     pending = [f for f in features if not f.get("passes") and f["id"] not in failed_ids]
     pending_map = {f["id"]: f for f in pending}
     human_ids = {f["id"] for f in pending if f.get("needs_human_input")}
+    manual_ids = {f["id"] for f in pending if f.get("needs_manual_testing")} - human_ids
 
     cycle_of = _find_cycle_members({
         f["id"]: [d for d in (f.get("dependencies") or []) if d in pending_map]
@@ -536,10 +537,13 @@ def explain_stalled_features(
         missing = [d for d in deps if d not in feature_map]
         failed = [d for d in deps if d in failed_ids]
         human = [d for d in deps if d in human_ids]
-        waiting = [d for d in deps if d in pending_map and d not in human_ids]
+        manual = [d for d in deps if d in manual_ids]
+        waiting = [d for d in deps if d in pending_map and d not in human_ids and d not in manual_ids]
 
         if fid in human_ids:
             reasons[fid] = "waiting for human input"
+        elif fid in manual_ids:
+            reasons[fid] = "waiting for manual testing"
         elif missing:
             reasons[fid] = f"depends on non-existent feature(s) {_format_ids(missing)}"
         elif fid in cycle_of:
@@ -549,6 +553,8 @@ def explain_stalled_features(
             reasons[fid] = f"depends on feature(s) that failed too many times {_format_ids(failed)}"
         elif human:
             reasons[fid] = f"depends on feature(s) waiting for human input {_format_ids(human)}"
+        elif manual:
+            reasons[fid] = f"depends on feature(s) waiting for manual testing {_format_ids(manual)}"
         elif waiting:
             reasons[fid] = f"waiting on unfinished feature(s) {_format_ids(waiting)}"
         elif f.get("in_progress"):
@@ -579,6 +585,8 @@ def build_graph_data(features: list[dict]) -> dict:
 
         if f.get("passes"):
             status = "done"
+        elif f.get("needs_manual_testing"):
+            status = "needs_manual_testing"
         elif blocking:
             status = "blocked"
         elif f.get("in_progress"):

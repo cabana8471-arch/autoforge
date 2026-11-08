@@ -364,6 +364,7 @@ Work ONLY on this feature. Other agents are handling other features.
 Use `feature_claim_and_get` with ID {feature_id} to claim it and get details.
 If blocked by an external dependency, use `feature_skip` and document the blocker.
 If the feature is too large to finish and verify in one session, use `feature_split` -- never skip or partially pass it.
+If the code is complete but cannot be verified here, use `feature_mark_needs_manual_testing`.
 
 ---
 
@@ -411,6 +412,8 @@ Process them IN ORDER: {ids_str}
 - If blocked on a feature by an external dependency, use `feature_skip` and move to the next one
 - If a feature is too large to finish and verify in this session, use `feature_split` -- never skip or partially pass it
 - Never mark a feature passing unless every step was actually verified
+- If a feature is code-complete but cannot be verified here (e.g. native mobile app),
+  use `feature_mark_needs_manual_testing` with testing notes instead of leaving it unfinished
 - Other agents are handling other features - focus only on yours
 
 ---
