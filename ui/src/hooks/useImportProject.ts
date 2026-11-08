@@ -27,6 +27,7 @@ interface AnalyzeResponse {
   components_count: number
   endpoints_count: number
   summary: string
+  is_autoforge_project?: boolean  // folder already holds AutoForge data
 }
 
 interface DetectedFeature {

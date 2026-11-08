@@ -29,7 +29,7 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import { useImportProject } from '../hooks/useImportProject'
-import { useCreateProject } from '../hooks/useProjects'
+import { useCreateProject, useReregisterProject } from '../hooks/useProjects'
 import { FolderBrowser } from './FolderBrowser'
 import {
   Dialog,
@@ -64,6 +64,8 @@ export function ImportProjectModal({
   const [projectName, setProjectName] = useState('')
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [registerError, setRegisterError] = useState<string | null>(null)
+  // Re-register an existing AutoForge folder as is (no feature extraction, nothing scaffolded)
+  const [reregister, setReregister] = useState(false)
   const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Track if modal is active to prevent stale state updates after close/unmount
@@ -81,6 +83,7 @@ export function ImportProjectModal({
   } = useImportProject()
 
   const createProject = useCreateProject()
+  const reregisterProject = useReregisterProject()
 
   // Set active on mount/open, inactive on close/unmount
   useEffect(() => {
@@ -101,6 +104,7 @@ export function ImportProjectModal({
     setProjectName('')
     setExpandedCategories(new Set())
     setRegisterError(null)
+    setReregister(false)
     reset()
     onClose()
   }, [onClose, reset])
@@ -148,7 +152,8 @@ export function ImportProjectModal({
     }
   }
 
-  const handleContinueToRegister = () => {
+  const handleContinueToRegister = (asIs = false) => {
+    setReregister(asIs)
     // Generate default project name from path
     const pathParts = state.projectPath?.split(/[/\\]/) || []
     const defaultName = pathParts[pathParts.length - 1] || 'imported-project'
@@ -169,6 +174,19 @@ export function ImportProjectModal({
     setRegisterError(null)
 
     try {
+      if (reregister) {
+        // Existing AutoForge folder: keep its spec, features and progress as they are
+        await reregisterProject.mutateAsync({ name: trimmedName, path: state.projectPath })
+        if (!isActiveRef.current) return
+        setStep('complete')
+        redirectTimeoutRef.current = setTimeout(() => {
+          if (!isActiveRef.current) return
+          onProjectImported(trimmedName)
+          handleClose()
+        }, 1500)
+        return
+      }
+
       // First register the project
       await createProject.mutateAsync({
         name: trimmedName,
@@ -206,7 +224,8 @@ export function ImportProjectModal({
     } else if (step === 'features') {
       setStep('detected')
     } else if (step === 'register') {
-      setStep('features')
+      setStep(reregister ? 'detected' : 'features')
+      setReregister(false)
     }
   }
 
@@ -326,6 +345,16 @@ export function ImportProjectModal({
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-6">
+          {result.is_autoforge_project && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                This folder already contains AutoForge data (spec and/or features). Re-register it
+                as is to keep its spec, features and progress. Extracting features would add new
+                features on top of the existing ones.
+              </AlertDescription>
+            </Alert>
+          )}
           <Card>
             <CardContent className="p-4">
               <p className="text-sm text-muted-foreground">{result.summary}</p>
@@ -376,7 +405,18 @@ export function ImportProjectModal({
             <ArrowLeft size={16} />
             Back
           </Button>
-          <Button onClick={handleExtractFeatures} disabled={state.step === 'extracting'}>
+          <div className="flex gap-2">
+          {result.is_autoforge_project && (
+            <Button onClick={() => handleContinueToRegister(true)} disabled={state.step === 'extracting'}>
+              Re-register as is
+              <ArrowRight size={16} />
+            </Button>
+          )}
+          <Button
+            variant={result.is_autoforge_project ? 'outline' : 'default'}
+            onClick={handleExtractFeatures}
+            disabled={state.step === 'extracting'}
+          >
             {state.step === 'extracting' ? (
               <>
                 <Loader2 size={16} className="animate-spin" />
@@ -389,6 +429,7 @@ export function ImportProjectModal({
               </>
             )}
           </Button>
+          </div>
         </DialogFooter>
       </>
     )
@@ -510,7 +551,7 @@ export function ImportProjectModal({
             <ArrowLeft size={16} />
             Back
           </Button>
-          <Button onClick={handleContinueToRegister} disabled={state.selectedFeatures.length === 0}>
+          <Button onClick={() => handleContinueToRegister(false)} disabled={state.selectedFeatures.length === 0}>
             Continue
             <ArrowRight size={16} />
           </Button>
@@ -525,7 +566,7 @@ export function ImportProjectModal({
       'sm:max-w-lg',
       <>
         <DialogHeader>
-          <DialogTitle>Register Project</DialogTitle>
+          <DialogTitle>{reregister ? 'Re-register Project' : 'Register Project'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -547,10 +588,14 @@ export function ImportProjectModal({
 
           <Card>
             <CardContent className="p-4 text-sm space-y-1">
-              <div className="flex justify-between">
-                <span>Features to create:</span>
-                <span className="font-semibold">{state.selectedFeatures.length}</span>
-              </div>
+              {reregister ? (
+                <div className="text-muted-foreground">Existing spec, features and progress are kept as they are.</div>
+              ) : (
+                <div className="flex justify-between">
+                  <span>Features to create:</span>
+                  <span className="font-semibold">{state.selectedFeatures.length}</span>
+                </div>
+              )}
               <div className="flex justify-between gap-4">
                 <span>Project path:</span>
                 <span className="font-mono text-xs truncate max-w-[200px]">{state.projectPath}</span>
@@ -572,16 +617,16 @@ export function ImportProjectModal({
           </Button>
           <Button
             onClick={handleRegisterAndCreate}
-            disabled={!projectName.trim() || createProject.isPending || state.step === 'creating'}
+            disabled={!projectName.trim() || createProject.isPending || reregisterProject.isPending || state.step === 'creating'}
           >
-            {createProject.isPending || state.step === 'creating' ? (
+            {createProject.isPending || reregisterProject.isPending || state.step === 'creating' ? (
               <>
                 <Loader2 size={16} className="animate-spin" />
                 Creating...
               </>
             ) : (
               <>
-                Import Project
+                {reregister ? 'Re-register Project' : 'Import Project'}
                 <CheckCircle2 size={16} />
               </>
             )}
@@ -606,7 +651,7 @@ export function ImportProjectModal({
           <h3 className="font-semibold text-xl mb-2">{projectName}</h3>
           <p className="text-muted-foreground mb-2">Project imported successfully!</p>
           <p className="text-sm text-muted-foreground">
-            {state.createResult?.created} features created
+            {reregister ? 'Existing spec, features and progress kept' : `${state.createResult?.created ?? 0} features created`}
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
             <Loader2 size={16} className="animate-spin" />

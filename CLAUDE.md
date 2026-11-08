@@ -136,6 +136,7 @@ python -m pytest test_testing_model.py         # Separate model for testing agen
 python -m pytest test_feature_report_bug.py    # Assistant bug reports reopen the existing feature
 python -m pytest test_spec_conversation_summary.py  # Spec chat transcript (spec_input_summary.md)
 python -m pytest test_test_evidence.py         # Test evidence: screenshot copies, symlink safety, pruning, endpoint
+python -m pytest test_project_import.py        # Re-register an AutoForge folder (API, wizard detection, CLI option 4)
 ```
 
 ### React UI

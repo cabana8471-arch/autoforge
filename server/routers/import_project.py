@@ -82,6 +82,9 @@ class AnalyzeResponse(BaseModel):
     components_count: int
     endpoints_count: int
     summary: str
+    # True when the folder already holds AutoForge data (features.db / app_spec.txt):
+    # the wizard then offers re-registering it as is instead of extracting features
+    is_autoforge_project: bool = False
 
 
 class ExtractFeaturesRequest(BaseModel):
@@ -146,6 +149,7 @@ async def analyze_project(request: AnalyzeRequest):
 
     try:
         from analyzers import StackDetector
+        from autoforge_paths import is_autoforge_project
 
         detector = StackDetector(project_dir)
         result = detector.detect()
@@ -170,6 +174,7 @@ async def analyze_project(request: AnalyzeRequest):
             components_count=result.get("components_count", 0),
             endpoints_count=result.get("endpoints_count", 0),
             summary=result.get("summary", ""),
+            is_autoforge_project=is_autoforge_project(project_dir),
         )
 
     except Exception as e:
