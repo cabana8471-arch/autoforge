@@ -131,7 +131,7 @@ def _dump_database_state(feature_dicts: list[dict], label: str = ""):
 #
 # Stress test verification:
 #   1. Note baseline: tasklist | findstr python | find /c /v ""
-#   2. Run: python autonomous_agent_demo.py --project-dir test --parallel --max-concurrency 5
+#   2. Run: python autonomous_agent_demo.py --project-dir test --concurrency 5
 #   3. During run: count should never exceed baseline + 11 (1 orchestrator + 10 agents)
 #   4. After stop: should return to baseline
 # =============================================================================
@@ -1921,7 +1921,7 @@ async def run_parallel_orchestrator(
         model: Claude model to use
         yolo_mode: Whether to run in YOLO mode (skip testing agents)
         testing_agent_ratio: Number of regression agents to maintain (0-3)
-        testing_batch_size: Number of features per testing batch (1-5)
+        testing_batch_size: Number of features per testing batch (1-15)
         batch_size: Max features per coding agent batch (1-3)
     """
     print(f"[ORCHESTRATOR] run_parallel_orchestrator called with max_concurrency={max_concurrency}", flush=True)
@@ -2016,13 +2016,13 @@ def main():
         "--testing-batch-size",
         type=int,
         default=DEFAULT_TESTING_BATCH_SIZE,
-        help=f"Number of features per testing batch (1-5, default: {DEFAULT_TESTING_BATCH_SIZE})",
+        help=f"Number of features per testing batch (1-15, default: {DEFAULT_TESTING_BATCH_SIZE})",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=3,
-        help="Max features per coding agent batch (1-5, default: 3)",
+        help="Max features per coding agent batch (1-15, default: 3)",
     )
 
     args = parser.parse_args()
