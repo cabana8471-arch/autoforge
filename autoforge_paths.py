@@ -366,10 +366,14 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
             # symlinks=True copies links as links: a link planted inside prompts/
             # must not copy a file from outside the project into it
             # (and refuses a junction anywhere in the tree, which copytree would follow)
-            from api.safe_project_io import refuse_nested_junctions
+            # (a hard-linked prompt is refused too: the copy would launder its content)
+            from api.safe_project_io import copy2_refusing_hard_links, refuse_nested_junctions
 
             try:
-                shutil.copytree(str(old_prompts), str(new_prompts), symlinks=True, ignore=refuse_nested_junctions)
+                shutil.copytree(
+                    str(old_prompts), str(new_prompts), symlinks=True, ignore=refuse_nested_junctions,
+                    copy_function=copy2_refusing_hard_links,
+                )
             except BaseException:
                 # No half-copied prompts/: it would block this migration on the next run
                 shutil.rmtree(str(new_prompts), ignore_errors=True)

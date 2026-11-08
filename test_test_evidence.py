@@ -237,6 +237,24 @@ class TestBuildTestEvidence:
 
         assert (target / "keep.png").exists()
 
+    @pytest.mark.parametrize("dir_fd", [True, False])
+    def test_hard_linked_screenshot_is_not_copied(self, project_dir, tmp_path, monkeypatch, dir_fd):
+        # A copy has a single link: it would serve the outside file's bytes as evidence
+        import api.test_evidence as te
+
+        monkeypatch.setattr(te, "_DIR_FD_SUPPORTED", dir_fd and te._DIR_FD_SUPPORTED)
+        outside = tmp_path / "secret.png"
+        outside.write_bytes(b"SECRET-BYTES")
+        (project_dir / ".playwright-cli").mkdir()
+        os.link(outside, project_dir / ".playwright-cli" / "hard.png")
+
+        evidence, warnings = build_test_evidence(project_dir, 8, "passing", screenshots=[".playwright-cli/hard.png"])
+
+        assert evidence["screenshots"] == [".playwright-cli/hard.png"]  # not copied into evidence
+        assert warnings
+        copies = project_dir / ".autoforge" / "evidence" / "feature_8"
+        assert not copies.exists() or list(copies.iterdir()) == []
+
     def test_path_fallback_copies_and_refuses_symlinked_dir(self, project_dir, screenshot, tmp_path, monkeypatch):
         # Platforms without dir_fd support (Windows) use the path-based check
         import api.test_evidence as te
