@@ -181,12 +181,19 @@ def test_spec_chat_does_not_delete_spec_through_symlinked_autoforge(project: Pat
     assert _survived(outside, "prompts/app_spec.txt")
 
 
-def test_browser_view_screenshot_cleanup_skips_symlinked_dir(project: Path, outside: Path) -> None:
+def test_browser_view_screenshot_cleanup_never_touches_the_project(project: Path, outside: Path) -> None:
     from server.services.browser_view_service import BrowserViewService
 
     (outside / "_view_s1.png").write_text("keep", encoding="utf-8")
     (project / ".playwright-cli").symlink_to(outside, target_is_directory=True)
+    service = BrowserViewService("demo", project)
 
-    BrowserViewService("demo", project)._cleanup_screenshot_file("s1")
+    service._cleanup_screenshot_file("s1")  # no capture yet: nothing to remove
+    path = service._screenshot_path("s1", create=True)
+    assert path is not None and not path.resolve().is_relative_to(project.resolve())
+    path.write_bytes(b"png")
+    service._cleanup_screenshot_file("s1")
 
+    assert not path.exists()
     assert _survived(outside, "_view_s1.png")
+    asyncio.run(service.stop())

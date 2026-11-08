@@ -13,14 +13,15 @@ delivers the frames to subscribed UI clients.
 import asyncio
 import base64
 import logging
+import os
 import shutil
+import stat
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
-
-from api.safe_project_io import read_project_file, unlink_project_file
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,18 @@ class BrowserViewService:
         self._screenshot_callbacks: set[Callable[[ScreenshotData], Awaitable[None]]] = set()
         self._lock = asyncio.Lock()
         self._playwright_cli: str | None = None
+        # Screenshots go to a private temp folder of the server, outside the
+        # project, so nothing the agent plants in the project can redirect the
+        # write or the read (created on first capture, removed by stop())
+        self._screenshot_dir: Path | None = None
+
+    def _screenshot_path(self, session_name: str, create: bool = False) -> Path | None:
+        """Path of a session's screenshot in the private folder (None before the first capture)."""
+        if self._screenshot_dir is None:
+            if not create:
+                return None
+            self._screenshot_dir = Path(tempfile.mkdtemp(prefix="autoforge-view-"))  # mode 0700
+        return self._screenshot_dir / f"_view_{session_name}.png"
 
     def _get_playwright_cli(self) -> str | None:
         """Find playwright-cli executable."""
@@ -137,6 +150,9 @@ class BrowserViewService:
                 self._cleanup_screenshot_file(session_name)
             self._active_sessions.clear()
             self._stop_polling()
+            if self._screenshot_dir is not None:
+                shutil.rmtree(self._screenshot_dir, ignore_errors=True)
+                self._screenshot_dir = None
 
     def _start_polling(self) -> None:
         """Start the screenshot polling loop."""
@@ -191,9 +207,8 @@ class BrowserViewService:
             if session.consecutive_failures % int(BACKOFF_INTERVAL / POLL_INTERVAL) != 0:
                 return
 
-        screenshot_dir = self.project_dir / ".playwright-cli"
-        screenshot_dir.mkdir(parents=True, exist_ok=True)
-        screenshot_path = screenshot_dir / f"_view_{session.session_name}.png"
+        screenshot_path = self._screenshot_path(session.session_name, create=True)
+        assert screenshot_path is not None
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -221,7 +236,7 @@ class BrowserViewService:
                 return
 
             # Sent to the UI: never read through a link the agent planted
-            image_bytes = read_project_file(self.project_dir, screenshot_path)
+            image_bytes = _read_regular_file(screenshot_path)
             image_base64 = base64.b64encode(image_bytes).decode("ascii")
 
             # Reset failure counter on success
@@ -253,17 +268,28 @@ class BrowserViewService:
         finally:
             # Clean up the screenshot file
             try:
-                unlink_project_file(self.project_dir, screenshot_path, missing_ok=True)
+                screenshot_path.unlink(missing_ok=True)
             except Exception:
                 pass
 
     def _cleanup_screenshot_file(self, session_name: str) -> None:
         """Remove a session's screenshot file."""
+        path = self._screenshot_path(session_name)
+        if path is None:
+            return
         try:
-            path = self.project_dir / ".playwright-cli" / f"_view_{session_name}.png"
-            unlink_project_file(self.project_dir, path, missing_ok=True)
+            path.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def _read_regular_file(path: Path) -> bytes:
+    """Read a screenshot from the private folder; refuse anything but a regular file."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        return f.read()
 
 
 # ---------------------------------------------------------------------------

@@ -260,10 +260,28 @@ def test_log_download_streams_a_real_export(project: Path, monkeypatch: pytest.M
     assert response.headers["content-disposition"] == 'attachment; filename="logs_demo.jsonl"'
 
 
-def test_browser_view_does_not_send_linked_screenshot(
-    project: Path, secret: Path, monkeypatch: pytest.MonkeyPatch
+def test_browser_view_screenshot_lives_outside_the_project(
+    project: Path, secret: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """playwright-cli writes the capture into a private server folder, not into the
+    project, so a link planted in .playwright-cli/ redirects neither the write nor the read."""
+    import base64
+    import sys
+
     from server.services.browser_view_service import BrowserViewService, SessionInfo
+
+    # Stand-in for playwright-cli: records where it was asked to write and writes a PNG there
+    seen = tmp_path / "seen.txt"
+    cli = tmp_path / "fake-playwright-cli"
+    cli.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "target = next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--filename='))\n"
+        f"open({str(seen)!r}, 'w').write(target)\n"
+        "open(target, 'wb').write(b'PNGDATA')\n"
+    )
+    cli.chmod(0o755)
+    _plant(project / ".playwright-cli" / "_view_s1.png", secret)  # must play no part
 
     service = BrowserViewService("demo", project)
     sent: list[Any] = []
@@ -272,13 +290,20 @@ def test_browser_view_does_not_send_linked_screenshot(
         sent.append(screenshot)
 
     service._screenshot_callbacks.add(collect)
-    monkeypatch.setattr(service, "_get_playwright_cli", lambda: "/bin/true")
-    _plant(project / ".playwright-cli" / "_view_s1.png", secret, hard=True)
+    monkeypatch.setattr(service, "_get_playwright_cli", lambda: str(cli))
     session = SessionInfo(session_name="s1", agent_index=0, agent_type="coding", feature_id=1, feature_name="f")
 
     asyncio.run(service._capture_and_deliver(session))
 
-    assert sent == [] and session.consecutive_failures == 1
+    target = Path(seen.read_text())
+    assert not target.resolve().is_relative_to(project.resolve())
+    assert len(sent) == 1 and base64.b64decode(sent[0].image_base64) == b"PNGDATA"
+    assert not target.exists()  # removed after delivery
+    assert secret.read_text(encoding="utf-8") == SECRET
+    private_dir = service._screenshot_dir
+    assert private_dir is not None and private_dir.is_dir()
+    asyncio.run(service.stop())
+    assert not private_dir.exists()
 
 
 # ---------------------------------------------------------------------------
