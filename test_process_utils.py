@@ -18,6 +18,14 @@ from server.utils.process_utils import kill_process_tree, wait_procs_safe
 EINVAL_ERROR = OSError(errno.EINVAL, "Invalid argument")
 
 
+
+def _is_gone(proc: psutil.Process) -> bool:
+    """True when the process exited (a zombie counts; it may be reaped between calls)."""
+    try:
+        return not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
 def _spawn_sleeper() -> subprocess.Popen:
     return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
 
@@ -79,7 +87,7 @@ def test_kill_process_tree_survives_einval():
         assert result.children_found == len(children)
         assert parent.poll() is not None
         for child in children:
-            assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+            assert _is_gone(child)
     finally:
         if parent.poll() is None:
             parent.kill()
