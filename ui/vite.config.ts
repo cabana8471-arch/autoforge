@@ -55,6 +55,8 @@ export default defineConfig({
       '/api': {
         target: `http://127.0.0.1:${apiPort}`,
         changeOrigin: true,
+        // Assistant, spec, expand and terminal WebSockets live under /api
+        ws: true,
       },
       '/ws': {
         target: `ws://127.0.0.1:${apiPort}`,

@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test'
 
 /**
- * E2E tooltip tests for header icon buttons.
+ * E2E tooltip tests for the control bar's icon buttons.
  *
  * Run tests:
  *   cd ui && npm run test:e2e
  *   cd ui && npm run test:e2e -- tooltip.spec.ts
  */
-test.describe('Header tooltips', () => {
+test.describe('Control bar tooltips', () => {
   test.setTimeout(30000)
 
   test.beforeEach(async ({ page }) => {
@@ -19,7 +19,7 @@ test.describe('Header tooltips', () => {
     const projectSelector = page.locator('button:has-text("Select Project")')
     if (await projectSelector.isVisible()) {
       await projectSelector.click()
-      const items = page.locator('.neo-dropdown-item')
+      const items = page.locator('[role="menuitem"][title]')
       const itemCount = await items.count()
       if (itemCount === 0) return false
       await items.first().click()
@@ -29,19 +29,19 @@ test.describe('Header tooltips', () => {
     return false
   }
 
-  test('Settings tooltip shows on hover', async ({ page }) => {
+  test('Denied commands tooltip shows on hover', async ({ page }) => {
     const hasProject = await selectProject(page)
     if (!hasProject) {
       test.skip(true, 'No projects available')
       return
     }
 
-    const settingsButton = page.locator('button[aria-label="Open Settings"]')
-    await expect(settingsButton).toBeVisible()
+    const deniedButton = page.locator('button[aria-label^="Denied commands"]')
+    await expect(deniedButton).toBeVisible()
 
-    await settingsButton.hover()
+    await deniedButton.hover()
 
-    const tooltip = page.locator('[data-slot="tooltip-content"]', { hasText: 'Settings' })
+    const tooltip = page.locator('[data-slot="tooltip-content"]', { hasText: 'Denied commands' })
     await expect(tooltip).toBeVisible({ timeout: 2000 })
   })
 })

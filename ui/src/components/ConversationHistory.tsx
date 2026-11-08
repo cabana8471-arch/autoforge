@@ -118,7 +118,10 @@ export function ConversationHistory({
       />
 
       {/* Dropdown */}
-      <Card className="absolute top-full left-0 mt-2 z-50 w-[320px] max-w-[calc(100vw-2rem)] shadow-lg">
+      <Card
+        className="absolute top-full left-0 mt-2 z-50 w-[320px] max-w-[calc(100vw-2rem)] shadow-lg"
+        data-testid="conversation-history"
+      >
         {/* Header */}
         <CardHeader className="p-3 border-b border-border">
           <h3 className="font-bold text-sm">Conversation History</h3>
@@ -142,6 +145,7 @@ export function ConversationHistory({
                 return (
                   <div
                     key={conversation.id}
+                    data-testid="conversation-item"
                     className={`flex items-center group ${
                       isCurrent ? 'bg-primary/10' : 'hover:bg-muted'
                     }`}

@@ -62,7 +62,10 @@ export function KanbanColumn({
   }
 
   return (
-    <Card className={`overflow-hidden ${colorMap[color]} py-0`}>
+    <Card
+      className={`overflow-hidden ${colorMap[color]} py-0`}
+      data-testid={`kanban-column-${title.toLowerCase().replace(/\s+/g, '-')}`}
+    >
       {/* Header */}
       <CardHeader className="px-4 py-3 border-b flex-row items-center justify-between space-y-0">
         <CardTitle className="text-lg font-semibold flex items-center gap-2">

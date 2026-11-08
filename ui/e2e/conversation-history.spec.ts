@@ -27,7 +27,7 @@ test.describe('Assistant Panel UI', () => {
     const projectSelector = page.locator('button:has-text("Select Project")')
     if (await projectSelector.isVisible()) {
       await projectSelector.click()
-      const projectItem = page.locator('.neo-dropdown-item').first()
+      const projectItem = page.locator('[role="menuitem"][title]').first()
       const hasProject = await projectItem.isVisible().catch(() => false)
       if (!hasProject) {
         return false
@@ -171,7 +171,7 @@ test.describe('Assistant Panel UI', () => {
     await expect(historyDropdown).toBeVisible({ timeout: 5000 })
 
     // Dropdown should be inside the panel (not hidden by edge)
-    const dropdownBox = await page.locator('.neo-dropdown:has-text("Conversation History")').boundingBox()
+    const dropdownBox = await page.getByTestId('conversation-history').boundingBox()
     const panelBox = await page.locator('[aria-label="Project Assistant"]').boundingBox()
 
     if (dropdownBox && panelBox) {
@@ -200,12 +200,12 @@ test.describe('Assistant Panel UI', () => {
     await historyButton.click()
 
     // Should show either "No conversations yet" or a list of conversations
-    const dropdown = page.locator('.neo-dropdown:has-text("Conversation History")')
+    const dropdown = page.getByTestId('conversation-history')
     await expect(dropdown).toBeVisible({ timeout: 5000 })
 
     // Check content - either empty state or conversation items
     const emptyState = dropdown.locator('text=No conversations yet')
-    const conversationItems = dropdown.locator('.neo-dropdown-item')
+    const conversationItems = dropdown.getByTestId('conversation-item')
 
     const hasEmpty = await emptyState.isVisible().catch(() => false)
     const itemCount = await conversationItems.count()
@@ -308,6 +308,8 @@ test.describe('Assistant Panel UI', () => {
 // =============================================================================
 test.describe('Conversation History Integration', () => {
   test.setTimeout(120000)
+  // One assistant session per project: a test running in parallel would close this one's session
+  test.describe.configure({ mode: 'serial' })
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -318,7 +320,7 @@ test.describe('Conversation History Integration', () => {
     const projectSelector = page.locator('button:has-text("Select Project")')
     if (await projectSelector.isVisible()) {
       await projectSelector.click()
-      const projectItem = page.locator('.neo-dropdown-item').first()
+      const projectItem = page.locator('[role="menuitem"][title]').first()
       const hasProject = await projectItem.isVisible().catch(() => false)
       if (!hasProject) return false
       await projectItem.click()
@@ -349,8 +351,8 @@ test.describe('Conversation History Integration', () => {
       const inputArea = page.locator('textarea[placeholder="Ask about the codebase..."]')
       await expect(inputArea).toBeEnabled({ timeout: 30000 })
       return true
-    } catch {
-      console.log('Assistant not available - API may not be configured')
+    } catch (error) {
+      console.log(`Assistant not available - API may not be configured: ${error}`)
       return false
     }
   }
@@ -386,7 +388,7 @@ test.describe('Conversation History Integration', () => {
     // STEP 1: Send first message
     console.log('STEP 1: Ask 1+1')
     await sendMessageAndWaitForResponse(page, 'how much is 1+1')
-    await expect(page.locator('.flex-1.overflow-y-auto')).toContainText('2', { timeout: 5000 })
+    await expect(page.locator('[aria-label="Project Assistant"] .flex-1.overflow-y-auto')).toContainText('2', { timeout: 5000 })
 
     // Count greeting messages before closing
     const greetingSelector = 'text=Hello! I\'m your project assistant'
@@ -425,7 +427,7 @@ test.describe('Conversation History Integration', () => {
     // STEP 4: Send second message in new chat
     console.log('STEP 4: Ask 2+2')
     await sendMessageAndWaitForResponse(page, 'how much is 2+2')
-    await expect(page.locator('.flex-1.overflow-y-auto')).toContainText('4', { timeout: 5000 })
+    await expect(page.locator('[aria-label="Project Assistant"] .flex-1.overflow-y-auto')).toContainText('4', { timeout: 5000 })
 
     // STEP 5: Check history has both conversations
     console.log('STEP 5: Check history')
@@ -433,14 +435,15 @@ test.describe('Conversation History Integration', () => {
     await historyButton.click()
     await expect(page.locator('h3:has-text("Conversation History")')).toBeVisible()
 
-    const conversationItems = page.locator('.neo-dropdown:has-text("Conversation History") .neo-dropdown-item')
+    const conversationItems = page.getByTestId('conversation-history').getByTestId('conversation-item')
     const count = await conversationItems.count()
     console.log(`Found ${count} conversations`)
     expect(count).toBeGreaterThanOrEqual(2)
 
     // STEP 6: Switch to first conversation
     console.log('STEP 6: Switch conversation')
-    await conversationItems.nth(1).click()
+    // By title (the first message), not position: earlier runs leave other conversations in the list
+    await conversationItems.filter({ hasText: 'how much is 1+1' }).first().click()
     // Wait for conversation to load by checking for the expected message
     await expect(page.locator('text=how much is 1+1').first()).toBeVisible({ timeout: 10000 })
     await expect(page.locator('text=how much is 2+2')).not.toBeVisible()
@@ -467,32 +470,37 @@ test.describe('Conversation History Integration', () => {
     }
 
     // Create a conversation
-    await sendMessageAndWaitForResponse(page, `test delete ${Date.now()}`)
+    const message = `test delete ${Date.now()}`
+    await sendMessageAndWaitForResponse(page, message)
 
     // Open history and get count
     const historyButton = page.locator('button[title="Conversation history"]')
     await historyButton.click()
     await expect(page.locator('h3:has-text("Conversation History")')).toBeVisible()
 
-    const conversationItems = page.locator('.neo-dropdown:has-text("Conversation History") .neo-dropdown-item')
+    const conversationItems = page.getByTestId('conversation-history').getByTestId('conversation-item')
+    // Count only once the list includes the conversation just created
+    await expect(conversationItems.filter({ hasText: message })).toHaveCount(1)
     const countBefore = await conversationItems.count()
 
-    // Delete first conversation
-    const deleteButton = page.locator('.neo-dropdown:has-text("Conversation History") button[title="Delete conversation"]').first()
+    // Delete the oldest conversation: deleting the current one starts a new conversation right away
+    const deleteButton = page.getByTestId('conversation-history').locator('button[title="Delete conversation"]').last()
     await deleteButton.click()
 
     // Confirm
-    const confirmButton = page.locator('button:has-text("Delete")').last()
+    const confirmDialog = page.getByRole('dialog', { name: 'Delete Conversation' })
+    const confirmButton = confirmDialog.getByRole('button', { name: 'Delete', exact: true })
     await expect(confirmButton).toBeVisible()
     await confirmButton.click()
 
     // Wait for confirmation dialog to close
-    await expect(confirmButton).not.toBeVisible({ timeout: 5000 })
+    await expect(confirmDialog).not.toBeVisible({ timeout: 5000 })
 
-    // Verify count decreased
-    await historyButton.click()
-    const countAfter = await conversationItems.count()
-    expect(countAfter).toBeLessThan(countBefore)
+    // Verify count decreased (the dropdown stays open after a delete; its backdrop covers the button)
+    if (!(await page.getByTestId('conversation-history').isVisible())) {
+      await historyButton.click()
+    }
+    await expect.poll(() => conversationItems.count()).toBeLessThan(countBefore)
   })
 
   // --------------------------------------------------------------------------
