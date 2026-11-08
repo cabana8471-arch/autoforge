@@ -211,6 +211,33 @@ def test_any_key_outside_the_safe_set_blocks_the_push(enabled: Path, remote: Pat
     assert _branches(remote) == ""
 
 
+def test_remote_named_like_a_url_blocks_the_push(enabled: Path, remote: Path):
+    """Only plain remote nicknames: a remote named like a URL could stand in for the stored URL."""
+    _git(enabled, "config", "remote.host:repo.git.url", "/elsewhere.git")
+    _commit(enabled, "x.txt")
+    ok, msg = git_sync.push_current_branch(enabled)
+    assert not ok
+    assert "remote.host:repo.git.url" in msg
+    assert _branches(remote) == ""
+
+
+def test_unreadable_config_refuses_the_push(enabled: Path, remote: Path, monkeypatch):
+    """Fail closed: if the config cannot be listed, nothing is known to be safe."""
+    real_git = git_sync._git
+
+    def failing_config(project_dir, *args, **kwargs):
+        if args[:1] == ("config",):
+            return subprocess.CompletedProcess(args, 129, "", "error: unknown option `show-scope'")
+        return real_git(project_dir, *args, **kwargs)
+
+    monkeypatch.setattr(git_sync, "_git", failing_config)
+    _commit(enabled, "x.txt")
+    ok, msg = git_sync.push_current_branch(enabled)
+    assert not ok
+    assert "could not read" in msg.lower()
+    assert _branches(remote) == ""
+
+
 def test_pre_push_hook_does_not_run(enabled: Path, remote: Path, tmp_path: Path):
     marker = tmp_path / "hook-ran"
     hook = enabled / ".git" / "hooks" / "pre-push"

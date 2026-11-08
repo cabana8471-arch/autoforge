@@ -27,6 +27,7 @@ force-pushes, never creates remotes, and runs non-interactively with a timeout.
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -50,6 +51,9 @@ SAFE_REPO_CONFIG_SUBSECTION_KEYS = frozenset({
     ("branch", "remote"), ("branch", "merge"), ("branch", "rebase"),
     ("remote", "url"), ("remote", "fetch"),
 })
+# Remote nicknames must be plain names: one shaped like a URL ("host:repo.git")
+# could stand in for the stored URL on the push command line
+_REMOTE_NICKNAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 
 # Overrides that beat any repo-local value (command-line config wins)
 _SAFE_CONFIG = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "push.gpgSign=false")
@@ -119,6 +123,10 @@ def find_unsafe_local_config(project_dir: Path) -> list[str]:
     listed and the repository's own scopes are checked.
     """
     result = _git(project_dir, "config", "--list", "--show-scope", "--name-only")
+    if result.returncode != 0:
+        # Fail closed: nothing is known to be safe (e.g. a broken config, or git older than 2.26)
+        detail = (result.stderr or "").strip().splitlines()
+        return [f"<could not read the git config: {detail[-1] if detail else f'exit code {result.returncode}'}>"]
     unsafe: set[str] = set()
     for line in result.stdout.splitlines():
         scope, _, key = line.strip().partition("\t")
@@ -132,6 +140,8 @@ def _is_safe_repo_key(key: str) -> bool:
     subsection, _, variable = rest.rpartition(".")
     section, variable = section.lower(), variable.lower()
     if subsection:
+        if section == "remote" and not _REMOTE_NICKNAME_RE.match(subsection):
+            return False
         return (section, variable) in SAFE_REPO_CONFIG_SUBSECTION_KEYS
     return f"{section}.{variable}" in SAFE_REPO_CONFIG_KEYS
 
