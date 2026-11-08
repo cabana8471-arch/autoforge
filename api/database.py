@@ -271,6 +271,18 @@ def check_project_database_path(project_dir: Path, db_path: Path) -> None:
             ) from e
 
 
+def guard_project_database_connections(engine: Engine, project_dir: Path, db_path: Path) -> None:
+    """Repeat ``check_project_database_path`` before every new DBAPI connection of ``engine``.
+
+    The pool opens connections long after the engine was created (after a dispose,
+    a pool recycle or under concurrency); a link planted in between is refused then.
+    """
+    def _check(*_args: object) -> None:
+        check_project_database_path(project_dir, db_path)
+
+    event.listen(engine, "do_connect", _check)
+
+
 def prepare_project_database_dir(project_dir: Path, db_path: Path) -> None:
     """Create the database's directory below the project (never through a symlink) and check the database.
 
@@ -762,6 +774,7 @@ def create_database(project_dir: Path) -> tuple:
         "check_same_thread": False,
         "timeout": 30  # Wait up to 30s for locks
     })
+    guard_project_database_connections(engine, project_dir, db_path)
 
     # Set journal mode BEFORE configuring event hooks
     # PRAGMA journal_mode must run outside of a transaction, and our event hooks

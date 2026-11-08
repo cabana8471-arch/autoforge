@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional, TextIO, cast
 
 from api.database import (
+    check_project_database_path,
     fall_back_to_rollback_journal,
     is_wal_io_error,
     prepare_project_database_dir,
@@ -203,6 +204,13 @@ def _write_log_schema(db_path: Path, journal_mode: str) -> None:
         conn.commit()
 
 
+def _connect_project_log_db(project_dir: Optional[Path], db_path: Path) -> sqlite3.Connection:
+    """Open logs.db, first refusing it if the agent replaced it with a link since the last check."""
+    if project_dir is not None:
+        check_project_database_path(project_dir, db_path)
+    return sqlite3.connect(db_path)
+
+
 class StructuredLogHandler(logging.Handler):
     """
     Custom logging handler that stores structured logs in SQLite.
@@ -215,9 +223,12 @@ class StructuredLogHandler(logging.Handler):
         db_path: Path,
         agent_id: Optional[str] = None,
         max_entries: int = 10000,
+        project_dir: Optional[Path] = None,
     ):
         super().__init__()
         self.db_path = db_path
+        # When set, every connection re-checks that logs.db is not behind a planted link
+        self.project_dir = project_dir
         self.agent_id = agent_id
         self.max_entries = max_entries
         self._lock = _write_lock_for(db_path)
@@ -253,7 +264,7 @@ class StructuredLogHandler(logging.Handler):
 
             with self._lock:
                 # Use context manager to ensure connection is closed on errors
-                with sqlite3.connect(self.db_path) as conn:
+                with _connect_project_log_db(self.project_dir, self.db_path) as conn:
                     cursor = conn.cursor()
 
                     cursor.execute(
@@ -331,7 +342,7 @@ class StructuredLogger:
         self.logger.handlers.clear()
 
         # Add structured handler
-        self.handler = StructuredLogHandler(self.db_path, agent_id)
+        self.handler = StructuredLogHandler(self.db_path, agent_id, project_dir=self.project_dir)
         self.handler.setFormatter(logging.Formatter("%(message)s"))
         self.logger.addHandler(self.handler)
 
@@ -409,12 +420,14 @@ class LogQuery:
     Supports filtering, searching, and aggregation.
     """
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, project_dir: Optional[Path] = None):
         self.db_path = db_path
+        # When set, every connection re-checks that logs.db is not behind a planted link
+        self.project_dir = project_dir
 
     def _connect(self) -> sqlite3.Connection:
         """Get database connection."""
-        conn = sqlite3.connect(self.db_path)
+        conn = _connect_project_log_db(self.project_dir, self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -749,4 +762,4 @@ def get_log_query(project_dir: Path) -> LogQuery:
     if not db_path.exists():
         # No agent has logged yet: create an empty schema so queries return no rows
         _init_log_database(db_path)
-    return LogQuery(db_path)
+    return LogQuery(db_path, project_dir=Path(project_dir))

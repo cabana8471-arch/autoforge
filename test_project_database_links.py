@@ -232,3 +232,59 @@ def test_assistant_db_opens_for_a_legacy_project_without_autoforge_dir(tmp_path)
         assert adb.get_conversation(project, conversation.id) is not None
     finally:
         adb.dispose_engine(project)
+
+
+def _swap_for_link(db: Path, target: Path) -> None:
+    """The agent replaces the database with a link after the server checked it."""
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{db}{suffix}").unlink(missing_ok=True)
+    db.symlink_to(target)
+
+
+def test_features_engine_rechecks_every_new_connection(project: Path, outside: Path) -> None:
+    """A link planted after create_database's check is refused when the pool opens a new connection."""
+    from sqlalchemy import text
+
+    engine, _ = database.create_database(project)
+    db = project / ".autoforge" / "features.db"
+    engine.dispose()  # close pooled connections so the next query opens a new one
+    _swap_for_link(db, _outside_db(outside))
+
+    with pytest.raises(sio.UnsafeProjectPathError):
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    assert _in_progress(outside / "other.db") == 1
+
+
+def test_assistant_engine_rechecks_every_new_connection(project: Path, outside: Path) -> None:
+    from sqlalchemy import text
+
+    from server.services import assistant_database as adb
+
+    try:
+        engine = adb.get_engine(project)
+        engine.dispose()
+        _swap_for_link(project / ".autoforge" / "assistant.db", _outside_db(outside))
+        with pytest.raises(sio.UnsafeProjectPathError):
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+    finally:
+        adb.dispose_engine(project)
+
+
+def test_log_writer_rechecks_before_each_connection(project: Path, outside: Path) -> None:
+    from structured_logging import _init_log_database, get_logger
+
+    logger = get_logger(project, agent_id="t")
+    db = project / ".autoforge" / "logs.db"
+    other = outside / "logs-other.db"
+    _init_log_database(other)  # a real log database outside the project
+    _swap_for_link(db, other)
+    logger.info("after the swap")
+
+    conn = sqlite3.connect(other)
+    try:
+        rows = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+    finally:
+        conn.close()
+    assert rows == 0  # nothing was written through the link

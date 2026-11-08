@@ -119,6 +119,8 @@ def get_engine(project_dir: Path):
                     "timeout": 30,  # Wait up to 30s for locks
                 }
             )
+            from api.database import guard_project_database_connections
+            guard_project_database_connections(engine, project_dir, db_path)
             Base.metadata.create_all(engine)
             _engine_cache[cache_key] = engine
             logger.debug(f"Created new database engine for {cache_key}")
