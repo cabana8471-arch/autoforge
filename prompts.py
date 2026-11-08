@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from api.safe_project_io import (
+    UnsafeProjectPathError,
     append_project_file,
     copy_tree_into_project,
     make_project_dirs,
@@ -56,6 +57,8 @@ def load_prompt(name: str, project_dir: Path | None = None) -> str:
 
     Raises:
         FileNotFoundError: If prompt not found in any location
+        UnsafeProjectPathError: The project prompt is reachable only through a
+            symlink or hard link (never silently replaced by the base template)
     """
     # 1. Try project-specific first
     if project_dir:
@@ -64,6 +67,13 @@ def load_prompt(name: str, project_dir: Path | None = None) -> str:
         if project_path.exists():
             try:
                 return read_project_text(project_dir, project_path)
+            except UnsafeProjectPathError as e:
+                # The project has its own prompt: running the generic template
+                # instead would silently drop it, so stop with a clear error
+                raise UnsafeProjectPathError(
+                    f"Refusing to load {project_path}: {e}. AutoForge does not follow links in the "
+                    "project (they could point outside it); replace the link with the file itself."
+                ) from e
             except (OSError, PermissionError) as e:
                 print(f"Warning: Could not read {project_path}: {e}")
 

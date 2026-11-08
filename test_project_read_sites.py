@@ -60,13 +60,32 @@ def _no_secret(value: Any) -> bool:
 
 
 @pytest.mark.parametrize("hard", [False, True])
-def test_load_prompt_falls_back_to_template_for_linked_prompt(project: Path, secret: Path, hard: bool) -> None:
+def test_load_prompt_refuses_linked_prompt_with_clear_error(project: Path, secret: Path, hard: bool) -> None:
+    """Neither the secret nor (silently) the generic template: the project's own prompt is refused."""
     import prompts
 
     _plant(project / ".autoforge" / "prompts" / "coding_prompt.md", secret, hard)
-    text = prompts.load_prompt("coding_prompt", project)
+    with pytest.raises(sio.UnsafeProjectPathError, match="Refusing to load .*coding_prompt.md"):
+        prompts.load_prompt("coding_prompt", project)
 
-    assert SECRET not in text
+
+def test_load_prompt_refuses_symlinked_prompts_dir(project: Path, tmp_path: Path) -> None:
+    import prompts
+
+    mine = tmp_path / "myprompts"
+    mine.mkdir()
+    (mine / "coding_prompt.md").write_text("MY CUSTOM prompt")
+    (project / ".autoforge" / "prompts").rmdir()
+    (project / ".autoforge" / "prompts").symlink_to(mine, target_is_directory=True)
+
+    with pytest.raises(sio.UnsafeProjectPathError, match="replace the link"):
+        prompts.load_prompt("coding_prompt", project)
+
+
+def test_load_prompt_still_falls_back_when_project_has_no_prompt(project: Path) -> None:
+    import prompts
+
+    text = prompts.load_prompt("coding_prompt", project)
     assert text == (prompts.TEMPLATES_DIR / "coding_prompt.template.md").read_text(encoding="utf-8")
 
 
