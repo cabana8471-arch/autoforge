@@ -189,7 +189,9 @@ class SpecChatSession:
         prompts_dir = get_prompts_dir(self.project_dir)
         app_spec_path = prompts_dir / "app_spec.txt"
         if app_spec_path.exists():
-            app_spec_path.unlink()
+            from api.safe_project_io import unlink_project_file
+            # Never through a symlinked directory the agent planted (raises when refused)
+            unlink_project_file(self.project_dir, app_spec_path)
             logger.info("Deleted scaffolded app_spec.txt for fresh spec creation")
         self._summary_path = prompts_dir / SPEC_CONVERSATION_FILENAME
 

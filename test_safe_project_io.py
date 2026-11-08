@@ -236,3 +236,67 @@ def test_project_helpers_path_fallback_refuses_symlinks(root, outside, monkeypat
         with pytest.raises(sio.UnsafeProjectPathError):
             sio.append_project_file(root, target, b"x")
     assert list(outside.iterdir()) == []
+
+
+def test_unlink_project_file_deletes_and_removes_final_symlink_only(root, outside):
+    victim = outside / "victim.txt"
+    victim.write_bytes(b"keep")
+    (root / "a.txt").write_bytes(b"a")
+    (root / "link.txt").symlink_to(victim)
+
+    sio.unlink_project_file(root, root / "a.txt")
+    sio.unlink_project_file(root, root / "link.txt")
+
+    assert not (root / "a.txt").exists() and not (root / "link.txt").is_symlink()
+    assert victim.read_bytes() == b"keep"
+    with pytest.raises(FileNotFoundError):
+        sio.unlink_project_file(root, root / "a.txt")
+    sio.unlink_project_file(root, root / "a.txt", missing_ok=True)
+    sio.unlink_project_file(root, root / "no" / "dir.txt", missing_ok=True)
+
+
+def test_unlink_project_file_refuses_symlinked_parent(root, outside, caplog):
+    (outside / "features.db").write_bytes(b"keep")
+    (root / ".autoforge").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.unlink_project_file(root, root / ".autoforge" / "features.db")
+    sio.unlink_project_file(root, root / ".autoforge" / "features.db", missing_ok=True)
+
+    assert (outside / "features.db").read_bytes() == b"keep"
+    assert "Not deleting" in caplog.text
+
+
+def test_remove_project_tree(root, outside):
+    (root / ".autoforge" / "prompts" / "sub").mkdir(parents=True)
+    (root / ".autoforge" / "prompts" / "sub" / "a.md").write_bytes(b"a")
+    sio.remove_project_tree(root, root / ".autoforge" / "prompts")
+    assert not (root / ".autoforge" / "prompts").exists()
+
+    (outside / "prompts").mkdir()
+    (outside / "prompts" / "a.md").write_bytes(b"keep")
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    (root / "final").symlink_to(outside / "prompts", target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.remove_project_tree(root, root / "linked" / "prompts")
+    with pytest.raises(OSError):
+        sio.remove_project_tree(root, root / "final")
+    assert (outside / "prompts" / "a.md").read_bytes() == b"keep"
+
+
+def test_delete_helpers_path_fallback(root, outside, monkeypatch):
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", False)
+    (outside / "features.db").write_bytes(b"keep")
+    (outside / "prompts").mkdir()
+    (root / ".autoforge").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.unlink_project_file(root, root / ".autoforge" / "features.db")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.remove_project_tree(root, root / ".autoforge" / "prompts")
+    assert {p.name for p in outside.iterdir()} == {"features.db", "prompts"}
+
+    (root / "real").mkdir()
+    (root / "real" / "x.txt").write_bytes(b"x")
+    sio.unlink_project_file(root, root / "real" / "x.txt")
+    sio.remove_project_tree(root, root / "real")
+    assert not (root / "real").exists()

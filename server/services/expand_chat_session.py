@@ -289,7 +289,8 @@ class ExpandChatSession:
         # Clean up temporary settings file
         if self._settings_file and self._settings_file.exists():
             try:
-                self._settings_file.unlink()
+                from api.safe_project_io import unlink_project_file
+                unlink_project_file(self.project_dir, self._settings_file)
             except Exception as e:
                 logger.warning(f"Error removing settings file: {e}")
 
@@ -330,7 +331,8 @@ class ExpandChatSession:
             if spec_path.exists():
                 try:
                     if SPEC_TEMPLATE_MARKER in spec_path.read_text(encoding="utf-8", errors="replace"):
-                        spec_path.unlink()
+                        from api.safe_project_io import unlink_project_file
+                        unlink_project_file(self.project_dir.resolve(), spec_path)
                         logger.info("Deleted scaffolded app_spec.txt template for onboarding")
                 except OSError as e:
                     logger.warning(f"Could not inspect app_spec.txt template: {e}")

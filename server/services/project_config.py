@@ -14,6 +14,8 @@ import logging
 from pathlib import Path
 from typing import TypedDict
 
+from api.safe_project_io import unlink_project_file, write_project_file
+
 # Python 3.11+ has tomllib in the standard library
 try:
     import tomllib
@@ -155,8 +157,6 @@ def _save_config(project_dir: Path, config: dict) -> None:
     Raises:
         OSError: If the file cannot be written.
     """
-    from api.safe_project_io import write_project_file
-
     config_path = _get_config_path(project_dir)
 
     try:
@@ -413,7 +413,7 @@ def clear_dev_command(project_dir: Path) -> None:
     # If config is now empty, delete the file
     if not config:
         try:
-            config_path.unlink(missing_ok=True)
+            unlink_project_file(project_dir, config_path, missing_ok=True)
             logger.info("Removed empty config file for %s", project_dir.name)
 
             # Also remove .autoforge directory if empty

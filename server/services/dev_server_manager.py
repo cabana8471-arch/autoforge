@@ -24,6 +24,7 @@ from typing import Awaitable, Callable, Literal, Set
 
 import psutil
 
+from api.safe_project_io import unlink_project_file
 from registry import list_registered_projects
 from server.utils.process_utils import kill_process_tree
 
@@ -217,11 +218,11 @@ class DevServerProcessManager:
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
             # Stale lock file - process no longer exists or is in different directory
-            self.lock_file.unlink(missing_ok=True)
+            unlink_project_file(self.project_dir, self.lock_file, missing_ok=True)
             return True
         except (ValueError, OSError):
             # Invalid lock file content - remove it
-            self.lock_file.unlink(missing_ok=True)
+            unlink_project_file(self.project_dir, self.lock_file, missing_ok=True)
             return True
 
     def _create_lock(self) -> None:
@@ -237,7 +238,7 @@ class DevServerProcessManager:
 
     def _remove_lock(self) -> None:
         """Remove lock file."""
-        self.lock_file.unlink(missing_ok=True)
+        unlink_project_file(self.project_dir, self.lock_file, missing_ok=True)
 
     async def _broadcast_output(self, line: str) -> None:
         """Broadcast output line to all registered callbacks."""
@@ -552,7 +553,7 @@ def cleanup_orphaned_devserver_locks() -> int:
                         pass
 
                 # Process not running - remove stale lock
-                lock_file.unlink(missing_ok=True)
+                unlink_project_file(project_path, lock_file, missing_ok=True)
                 cleaned += 1
                 logger.info("Removed orphaned dev server lock file for project '%s'", name)
 
@@ -561,7 +562,7 @@ def cleanup_orphaned_devserver_locks() -> int:
                 logger.warning(
                     "Removing invalid dev server lock file for project '%s': %s", name, e
                 )
-                lock_file.unlink(missing_ok=True)
+                unlink_project_file(project_path, lock_file, missing_ok=True)
                 cleaned += 1
 
     except Exception as e:

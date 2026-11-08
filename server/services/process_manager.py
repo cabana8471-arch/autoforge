@@ -21,6 +21,7 @@ import psutil
 
 # Add parent directory to path for shared module imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from api.safe_project_io import unlink_project_file  # noqa: E402
 from auth import AUTH_ERROR_HELP_SERVER as AUTH_ERROR_HELP  # noqa: E402
 from auth import is_auth_error
 from server.utils.process_utils import kill_process_tree
@@ -181,7 +182,7 @@ class AgentProcessManager:
                         # Allow 1 second tolerance for creation time comparison
                         if abs(proc.create_time() - stored_create_time) > 1.0:
                             # Different process reused the PID - stale lock
-                            self.lock_file.unlink(missing_ok=True)
+                            unlink_project_file(self.project_dir, self.lock_file, missing_ok=True)
                             return True
                     cmdline = " ".join(proc.cmdline())
                     if "autonomous_agent_demo.py" in cmdline:
@@ -189,10 +190,10 @@ class AgentProcessManager:
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
             # Stale lock file
-            self.lock_file.unlink(missing_ok=True)
+            unlink_project_file(self.project_dir, self.lock_file, missing_ok=True)
             return True
         except (ValueError, OSError):
-            self.lock_file.unlink(missing_ok=True)
+            unlink_project_file(self.project_dir, self.lock_file, missing_ok=True)
             return True
 
     def _create_lock(self) -> bool:
@@ -223,7 +224,7 @@ class AgentProcessManager:
 
     def _remove_lock(self) -> None:
         """Remove lock file."""
-        self.lock_file.unlink(missing_ok=True)
+        unlink_project_file(self.project_dir, self.lock_file, missing_ok=True)
 
     def _apply_playwright_headless(self, headless: bool) -> None:
         """Update .playwright/cli.config.json with the current headless setting.
@@ -362,7 +363,7 @@ class AgentProcessManager:
                 # Clean up drain signal file if present
                 try:
                     from autoforge_paths import get_pause_drain_path
-                    get_pause_drain_path(self.project_dir).unlink(missing_ok=True)
+                    unlink_project_file(self.project_dir, get_pause_drain_path(self.project_dir), missing_ok=True)
                 except Exception:
                     pass
 
@@ -577,7 +578,7 @@ class AgentProcessManager:
             # Clean up drain signal file if present
             try:
                 from autoforge_paths import get_pause_drain_path
-                get_pause_drain_path(self.project_dir).unlink(missing_ok=True)
+                unlink_project_file(self.project_dir, get_pause_drain_path(self.project_dir), missing_ok=True)
             except Exception:
                 pass
             self.status = "stopped"
@@ -674,7 +675,7 @@ class AgentProcessManager:
 
         try:
             from autoforge_paths import get_pause_drain_path
-            get_pause_drain_path(self.project_dir).unlink(missing_ok=True)
+            unlink_project_file(self.project_dir, get_pause_drain_path(self.project_dir), missing_ok=True)
             self.status = "running"
             return True, "Agent resumed from graceful pause"
         except Exception as e:
@@ -701,7 +702,7 @@ class AgentProcessManager:
                 # Clean up drain signal file if present
                 try:
                     from autoforge_paths import get_pause_drain_path
-                    get_pause_drain_path(self.project_dir).unlink(missing_ok=True)
+                    unlink_project_file(self.project_dir, get_pause_drain_path(self.project_dir), missing_ok=True)
                 except Exception:
                     pass
                 self.status = "crashed"
@@ -792,7 +793,7 @@ def cleanup_orphaned_locks() -> int:
             from autoforge_paths import get_autoforge_dir, get_pause_drain_path
             drain_file = get_pause_drain_path(project_path)
             if drain_file.exists():
-                drain_file.unlink(missing_ok=True)
+                unlink_project_file(project_path, drain_file, missing_ok=True)
                 logger.info("Removed stale drain signal file for project '%s'", name)
 
             # Check both legacy and new locations for lock files
@@ -828,7 +829,7 @@ def cleanup_orphaned_locks() -> int:
                         if stored_create_time is not None:
                             if abs(proc.create_time() - stored_create_time) > 1.0:
                                 # Different process reused the PID - stale lock
-                                lock_file.unlink(missing_ok=True)
+                                unlink_project_file(project_path, lock_file, missing_ok=True)
                                 cleaned += 1
                                 logger.info("Removed orphaned lock file for project '%s' (PID reused)", name)
                                 continue
@@ -844,7 +845,7 @@ def cleanup_orphaned_locks() -> int:
                         pass
 
                 # Process not running or not our agent - remove stale lock
-                lock_file.unlink(missing_ok=True)
+                unlink_project_file(project_path, lock_file, missing_ok=True)
                 cleaned += 1
                 logger.info("Removed orphaned lock file for project '%s'", name)
 
@@ -853,7 +854,7 @@ def cleanup_orphaned_locks() -> int:
                 logger.warning(
                     "Removing invalid lock file for project '%s': %s", name, e
                 )
-                lock_file.unlink(missing_ok=True)
+                unlink_project_file(project_path, lock_file, missing_ok=True)
                 cleaned += 1
 
     except Exception as e:

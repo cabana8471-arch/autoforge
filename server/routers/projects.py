@@ -552,11 +552,14 @@ async def reset_project(name: str, full_reset: bool = False):
         project_dir / ".claude_assistant_settings.json",
     ]
 
+    # Never delete through a symlinked directory the agent planted in the project
+    from api.safe_project_io import remove_project_tree, unlink_project_file
+
     for file_path in reset_files:
         if file_path.exists():
             try:
                 relative = file_path.relative_to(project_dir)
-                file_path.unlink()
+                unlink_project_file(project_dir, file_path)
                 deleted_files.append(str(relative))
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Failed to delete {file_path.name}: {e}")
@@ -569,7 +572,7 @@ async def reset_project(name: str, full_reset: bool = False):
             if prompts_dir.exists():
                 try:
                     relative = prompts_dir.relative_to(project_dir)
-                    shutil.rmtree(prompts_dir)
+                    remove_project_tree(project_dir, prompts_dir)
                     deleted_files.append(f"{relative}/")
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=f"Failed to delete prompts: {e}")

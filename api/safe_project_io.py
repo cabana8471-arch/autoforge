@@ -22,11 +22,15 @@ handling they already have for a failed write.
 """
 
 import errno
+import logging
 import os
+import shutil
 import stat
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DIR_FD_SUPPORTED = (
     hasattr(os, "O_NOFOLLOW")
@@ -328,3 +332,60 @@ def copy_tree_into_project(project_dir: Path, source_dir: Path, target: Path) ->
         make_project_dirs(project_dir, destination)
         for name in sorted(filenames):
             write_project_file(project_dir, destination / name, (Path(dirpath) / name).read_bytes())
+
+
+def unlink_project_file(project_dir: Path, target: Path, missing_ok: bool = False) -> None:
+    """Delete the file ``target`` (below ``project_dir``) without following a symlinked parent.
+
+    ``Path.unlink`` only leaves the last component alone: with a symlinked parent
+    (e.g. ``.autoforge`` -> elsewhere) it deletes the file at the link's target.
+    A symlink at ``target`` itself is removed, never what it points to.
+
+    With ``missing_ok`` a target whose parent is a symlink counts as absent (it
+    cannot be inside the project): the refusal is logged instead of raised.
+
+    Raises:
+        FileNotFoundError: the target is missing (unless ``missing_ok``)
+        UnsafeProjectPathError: outside the project or a parent is a symlink (unless ``missing_ok``)
+        OSError: the delete failed
+    """
+    try:
+        relative = _project_relative(project_dir, target)
+        if DIR_FD_SUPPORTED:
+            dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=False)
+            try:
+                os.unlink(relative.name, dir_fd=dir_fd)
+            finally:
+                os.close(dir_fd)
+        else:
+            _refuse_symlinks(project_dir, relative.parent)
+            (project_dir / relative).unlink()
+    except FileNotFoundError:
+        if not missing_ok:
+            raise
+    except UnsafeProjectPathError as e:
+        if not missing_ok:
+            raise
+        logger.warning("Not deleting %s: %s", target, e)
+
+
+def remove_project_tree(project_dir: Path, target: Path) -> None:
+    """Delete the directory tree ``target`` (below ``project_dir``) without following links.
+
+    ``shutil.rmtree`` refuses a symlink at the path itself, but follows a symlinked
+    parent; here the parents are walked with ``O_NOFOLLOW`` and the tree is removed
+    relative to the last directory descriptor.
+
+    Raises:
+        UnsafeProjectPathError: outside the project or a parent is a symlink
+        OSError: the target is missing, is a symlink, or the delete failed
+    """
+    relative = _project_relative(project_dir, target)
+    if DIR_FD_SUPPORTED:
+        dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=False)
+        try:
+            shutil.rmtree(relative.name, dir_fd=dir_fd)
+        finally:
+            os.close(dir_fd)
+        return
+    shutil.rmtree(_refuse_symlinks(project_dir, relative))

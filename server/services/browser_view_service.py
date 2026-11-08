@@ -20,6 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
 
+from api.safe_project_io import unlink_project_file
+
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2.0  # seconds between screenshot captures
@@ -250,7 +252,7 @@ class BrowserViewService:
         finally:
             # Clean up the screenshot file
             try:
-                screenshot_path.unlink(missing_ok=True)
+                unlink_project_file(self.project_dir, screenshot_path, missing_ok=True)
             except Exception:
                 pass
 
@@ -258,7 +260,7 @@ class BrowserViewService:
         """Remove a session's screenshot file."""
         try:
             path = self.project_dir / ".playwright-cli" / f"_view_{session_name}.png"
-            path.unlink(missing_ok=True)
+            unlink_project_file(self.project_dir, path, missing_ok=True)
         except Exception:
             pass
 

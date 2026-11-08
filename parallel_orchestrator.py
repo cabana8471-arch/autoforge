@@ -41,6 +41,7 @@ from api.dependency_resolver import (
     compute_scheduling_scores,
     explain_stalled_features,
 )
+from api.safe_project_io import unlink_project_file
 from progress import has_features
 from rate_limit_utils import MAX_LIMIT_RESET_SECONDS, calculate_rate_limit_backoff, parse_rate_limit_marker
 from server.utils.process_utils import kill_process_tree
@@ -1902,7 +1903,7 @@ class ParallelOrchestrator:
     def _clear_drain_signal(self) -> None:
         """Delete the drain signal file and reset the flag."""
         from autoforge_paths import get_pause_drain_path
-        get_pause_drain_path(self.project_dir).unlink(missing_ok=True)
+        unlink_project_file(self.project_dir, get_pause_drain_path(self.project_dir), missing_ok=True)
         self._drain_requested = False
 
     def cleanup(self) -> None:
