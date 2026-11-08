@@ -313,10 +313,11 @@ Projects can be stored in any directory (registered in `~/.autoforge/registry.db
 - `.autoforge/features.db` - SQLite database with feature test cases
 - `.autoforge/.agent.lock` - Lock file to prevent multiple agent instances
 - `.autoforge/allowed_commands.yaml` - Project-specific bash command allowlist (optional)
+- `.autoforge/validation/` - Validation artifacts (screenshots) captured while agents verify features - gitignored via `.autoforge/.gitignore`
 - `.autoforge/.gitignore` - Ignores runtime files
 - `.claude/skills/playwright-cli/` - Playwright CLI skill for browser automation
 - `.playwright/cli.config.json` - Browser configuration (headless, viewport, etc.)
-- `.playwright-cli/` - Playwright CLI daemon artifacts (screenshots, snapshots) - gitignored
+- `.playwright-cli/` - Playwright CLI daemon artifacts (snapshots, default screenshot output) - gitignored
 - `CLAUDE.md` - Stays at project root (SDK convention)
 - `app_spec.txt` - Root copy, only created for legacy projects whose prompts still read the spec from the project root (current templates read `.autoforge/prompts/app_spec.txt` directly)
 
