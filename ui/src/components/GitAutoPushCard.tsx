@@ -67,8 +67,10 @@ export function GitAutoPushCard({ projectName }: GitAutoPushCardProps) {
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>
-                  The remote now points to <code className="break-all">{status?.current_url ?? '(none)'}</code>, so
-                  pushes are refused. If you trust the new URL, turn auto-push off and on again.
+                  <p>
+                    The remote now points to <code className="break-all">{status?.current_url ?? '(none)'}</code>, so
+                    pushes are refused. If you trust the new URL, turn auto-push off and on again.
+                  </p>
                 </AlertDescription>
               </Alert>
             )}

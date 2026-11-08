@@ -300,7 +300,7 @@ export function SettingsView() {
                     <Alert className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 mt-2">
                       <AlertTriangle className="h-4 w-4 text-amber-600" />
                       <AlertDescription className="text-xs text-amber-700 dark:text-amber-300">
-                        Anthropic's policy may not permit using subscription-based auth (<code className="text-xs">claude login</code>) with third-party agents. Consider using an API key provider or setting the <code className="text-xs">ANTHROPIC_API_KEY</code> environment variable to avoid potential account issues.
+                        <p>Anthropic's policy may not permit using subscription-based auth (<code className="text-xs">claude login</code>) with third-party agents. Consider using an API key provider or setting the <code className="text-xs">ANTHROPIC_API_KEY</code> environment variable to avoid potential account issues.</p>
                       </AlertDescription>
                     </Alert>
                   )}

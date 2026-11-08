@@ -117,8 +117,10 @@ export function ProjectSkillsModal({ projectName, isOpen, onClose }: ProjectSkil
         {toRemove.length > 0 && (
           <Alert>
             <AlertDescription>
-              Removing a skill deletes its folder in <code className="font-mono">.claude/skills/</code>, including
-              any changes made to it in this project.
+              <p>
+                Removing a skill deletes its folder in <code className="font-mono">.claude/skills/</code>, including
+                any changes made to it in this project.
+              </p>
             </AlertDescription>
           </Alert>
         )}
