@@ -15,8 +15,9 @@ from server.services import assistant_database as db
 
 def _assert_utc_iso(value: str) -> None:
     parsed = datetime.fromisoformat(value)
-    assert parsed.utcoffset() is not None, value
-    assert parsed.utcoffset().total_seconds() == 0, value
+    offset = parsed.utcoffset()
+    assert offset is not None, value
+    assert offset.total_seconds() == 0, value
     assert abs((datetime.now(timezone.utc) - parsed).total_seconds()) < 120
 
 

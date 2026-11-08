@@ -10,7 +10,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, func
 from sqlalchemy.engine import Engine
@@ -289,7 +289,8 @@ def add_message(project_dir: Path, conversation_id: int, role: str, content: str
             "id": message.id,
             "role": message.role,
             "content": message.content,
-            "timestamp": _iso_utc(message.timestamp),
+            # A fresh instance types its legacy Column attributes as Column[...] for mypy
+            "timestamp": _iso_utc(cast(Optional[datetime], message.timestamp)),
         }
     finally:
         session.close()
