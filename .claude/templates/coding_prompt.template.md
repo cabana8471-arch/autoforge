@@ -15,7 +15,7 @@ pwd
 ls -la
 
 # 3. Read the project specification to understand what you're building
-cat app_spec.txt
+cat .autoforge/prompts/app_spec.txt
 
 # 4. Read progress notes from previous sessions (last 500 lines to avoid context overflow)
 tail -500 claude-progress.txt
@@ -31,8 +31,14 @@ Then use MCP tools to check feature status:
 Use the feature_get_stats tool
 ```
 
-Understanding the `app_spec.txt` is critical - it contains the full requirements
+Understanding the `.autoforge/prompts/app_spec.txt` is critical - it contains the full requirements
 for the application you're building.
+
+**Project layout:** Build the application in your working directory (the project root).
+The `.autoforge/` directory belongs to AutoForge (spec, prompts, feature database) -
+never put application code there or modify its files by hand. The only exception is
+verification artifacts: screenshots and test logs may be written to `.autoforge/validation/`
+and `.autoforge/evidence/`.
 
 ### STEP 2: START SERVERS (IF NOT RUNNING)
 
