@@ -264,11 +264,12 @@ def test_mcp_mark_needs_manual_testing(mcp_module):
     stats = json.loads(mcp_module.feature_get_stats())
     assert stats["needs_manual_testing"] == 1
 
-    # Marking passing clears the manual-testing flag
-    assert json.loads(mcp_module.feature_mark_passing(1))["success"] is True
+    # Only a human closes the lane (verdict endpoint): an agent cannot mark it passing
+    result = json.loads(mcp_module.feature_mark_passing(1))
+    assert "Manual Testing" in result.get("error", ""), result
     feature = json.loads(mcp_module.feature_get_by_id(1))
-    assert feature["passes"] is True
-    assert feature["needs_manual_testing"] is False
+    assert feature["passes"] is False
+    assert feature["needs_manual_testing"] is True
 
 
 def test_mcp_mark_needs_manual_testing_rejects_passing_feature(mcp_module):

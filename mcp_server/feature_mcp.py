@@ -222,7 +222,7 @@ def feature_get_stats() -> str:
         not_backlog = func.coalesce(Feature.backlog, False) == False  # noqa: E712
         result = session.query(
             func.sum(case((not_backlog, 1), else_=0)).label('total'),
-            func.sum(case((Feature.passes == True, 1), else_=0)).label('passing'),
+            func.sum(case((not_backlog & (Feature.passes == True), 1), else_=0)).label('passing'),  # noqa: E712
             func.sum(case((Feature.in_progress == True, 1), else_=0)).label('in_progress'),
             func.sum(case((Feature.needs_human_input == True, 1), else_=0)).label('needs_human_input'),
             func.sum(case((Feature.needs_manual_testing == True, 1), else_=0)).label('needs_manual_testing'),
@@ -376,9 +376,10 @@ def feature_mark_passing(
         # Atomic update with state guard - prevents double-pass in parallel mode
         result = session.execute(text("""
             UPDATE features
-            SET passes = 1, in_progress = 0, failure_reason = NULL, needs_manual_testing = 0,
+            SET passes = 1, in_progress = 0, failure_reason = NULL,
                 test_evidence = COALESCE(:evidence, test_evidence)
-            WHERE id = :id AND passes = 0
+            WHERE id = :id AND passes = 0 AND COALESCE(backlog, 0) = 0
+              AND COALESCE(needs_manual_testing, 0) = 0
         """), {"id": feature_id, "evidence": evidence_json})
         if quality_report is not None and result.rowcount > 0:
             session.execute(
@@ -396,6 +397,12 @@ def feature_mark_passing(
                 return json.dumps({"error": f"Feature with ID {feature_id} not found"})
             if feature.passes:
                 return json.dumps({"error": f"Feature with ID {feature_id} is already passing"})
+            if feature.needs_manual_testing:
+                return json.dumps({"error": f"Feature with ID {feature_id} is in the Manual Testing lane: "
+                                            "only a human marks it passed or failed"})
+            if feature.backlog:
+                return json.dumps({"error": f"Feature with ID {feature_id} is in the Backlog: it is not "
+                                            "scheduled work until a human promotes it"})
             return json.dumps({"error": "Failed to mark feature passing for unknown reason"})
 
         # Get the feature name for the response

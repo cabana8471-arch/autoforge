@@ -104,3 +104,37 @@ def test_mcp_stats_exclude_backlog(tmp_path, monkeypatch):
     assert stats["total"] == 1
     assert stats["percentage"] == 100.0
     assert stats["backlog"] == 1
+
+
+def test_mcp_mark_passing_refuses_a_backlog_feature(tmp_path, monkeypatch):
+    """A parked feature is not committed work: an agent cannot complete it behind the Backlog."""
+    feature_mcp = pytest.importorskip("mcp_server.feature_mcp")
+    from progress import count_passing_tests
+
+    engine, SessionLocal = _make_project(tmp_path, [
+        Feature(id=1, priority=1, category="c", name="pending", description="d", steps=[]),
+        Feature(id=2, priority=2, category="c", name="parked", description="d", steps=[], backlog=True),
+    ])
+    monkeypatch.setattr(feature_mcp, "_session_maker", SessionLocal)
+    result = json.loads(feature_mcp.feature_mark_passing(2))
+    stats = json.loads(feature_mcp.feature_get_stats())
+    engine.dispose()
+    assert "Backlog" in result.get("error", ""), result
+    assert stats["passing"] == 0
+    assert stats["percentage"] == 0.0
+    assert count_passing_tests(tmp_path)[0] == 0
+
+
+def test_mcp_stats_count_passing_outside_the_backlog_only(tmp_path, monkeypatch):
+    """A row left passing and parked (older data) must not push progress past the real work."""
+    feature_mcp = pytest.importorskip("mcp_server.feature_mcp")
+
+    engine, SessionLocal = _make_project(tmp_path, [
+        Feature(id=1, priority=1, category="c", name="pending", description="d", steps=[]),
+        Feature(id=2, priority=2, category="c", name="parked", description="d", steps=[], passes=True, backlog=True),
+    ])
+    monkeypatch.setattr(feature_mcp, "_session_maker", SessionLocal)
+    stats = json.loads(feature_mcp.feature_get_stats())
+    engine.dispose()
+    assert stats["passing"] == 0
+    assert stats["percentage"] == 0.0
