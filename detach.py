@@ -723,24 +723,33 @@ def restore_pre_reattach_backup(project_dir: Path) -> int:
     files_failed = 0
 
     for item in backup_dir.rglob("*"):
-        if item.is_file():
-            rel_path = item.relative_to(backup_dir)
-            dest = project_dir / rel_path
+        # Real directories are only containers; a symlink (to a file or a directory,
+        # possibly dangling inside the backup) is a user entry like a file. is_file()
+        # alone follows the link and silently skipped them.
+        if item.is_dir() and not item.is_symlink():
+            continue
+        rel_path = item.relative_to(backup_dir)
+        if not (item.is_symlink() or item.is_file()):
+            logger.error("Not restoring %s: not a regular file or symlink", rel_path)
+            files_failed += 1
+            continue
+        dest = project_dir / rel_path
 
-            # SECURITY: Path traversal protection
-            try:
-                dest.resolve().relative_to(project_dir_resolved)
-            except ValueError:
-                logger.error("Path traversal detected in pre-reattach backup: %s", rel_path)
-                continue  # Skip malicious path
+        # SECURITY: Path traversal protection
+        try:
+            dest.resolve().relative_to(project_dir_resolved)
+        except ValueError:
+            logger.error("Path traversal detected in pre-reattach backup: %s", rel_path)
+            files_failed += 1  # not restored: keep the backup
+            continue  # Skip malicious path
 
-            try:
-                copy_project_entry(project_dir, item, dest)
-                files_restored += 1
-                logger.debug("Restored user file: %s", rel_path)
-            except OSError as e:
-                logger.error("Failed to restore user file %s: %s", rel_path, e)
-                files_failed += 1
+        try:
+            copy_project_entry(project_dir, item, dest)
+            files_restored += 1
+            logger.debug("Restored user file: %s", rel_path)
+        except OSError as e:
+            logger.error("Failed to restore user file %s: %s", rel_path, e)
+            files_failed += 1
 
     # Only clean up backup directory if all files were restored successfully
     if files_failed == 0:

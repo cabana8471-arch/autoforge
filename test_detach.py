@@ -1743,6 +1743,37 @@ class TestPlantedLinks(unittest.TestCase):
 
         self.assertTrue((self.project_dir / "notes.md").is_symlink())
 
+    def test_pre_reattach_round_trip_keeps_relative_and_directory_symlinks(self):
+        """CLAUDE.md -> AGENTS.md and notes -> ../shared dangle inside the backup folder;
+        they must still be restored (and counted), and the backup kept on any failure."""
+        import os
+
+        (self.project_dir / "AGENTS.md").write_text("agents")
+        (self.project_dir / "CLAUDE.md").symlink_to("AGENTS.md")
+        (self.project_dir / "notes").symlink_to("../outside")
+        detach.backup_conflicts(self.project_dir, ["CLAUDE.md", "notes"])
+        os.unlink(self.project_dir / "CLAUDE.md")
+        os.unlink(self.project_dir / "notes")
+
+        restored = detach.restore_pre_reattach_backup(self.project_dir)
+
+        self.assertEqual(restored, 2)
+        self.assertEqual(os.readlink(self.project_dir / "CLAUDE.md"), "AGENTS.md")
+        self.assertEqual(os.readlink(self.project_dir / "notes"), "../outside")
+        self.assertFalse((self.project_dir / detach.PRE_REATTACH_BACKUP_DIR).exists())
+
+    def test_pre_reattach_backup_is_kept_when_an_entry_is_not_restored(self):
+        backup_dir = self.project_dir / detach.PRE_REATTACH_BACKUP_DIR
+        backup_dir.mkdir()
+        (backup_dir / "notes.md").write_text("mine")
+        (self.project_dir / "notes.md").symlink_to(self.outside / "id_rsa")  # dest resolves outside: skipped
+
+        restored = detach.restore_pre_reattach_backup(self.project_dir)
+
+        self.assertEqual(restored, 0)
+        self.assertTrue((backup_dir / "notes.md").exists())
+        self.assertEqual((self.outside / "id_rsa").read_text(), "secret")
+
     def test_gitignore_not_created_through_dangling_symlink(self):
         (self.project_dir / ".gitignore").symlink_to(self.outside / "created")
 
