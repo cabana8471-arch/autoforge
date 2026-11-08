@@ -97,3 +97,19 @@ def test_guard_detects_imports_inside_functions(tmp_path: Path) -> None:
     )
 
     assert _imported_top_level_names(source) == {"os", "pathlib", "structured_logging", "api"}
+
+
+def test_playwright_cli_install_is_pinned_everywhere() -> None:
+    """playwright-cli warns when the project's skill differs from the one its version ships.
+
+    The repo's ``.claude/skills/playwright-cli`` (copied into every project) matches one
+    release, so every installer must install that release, not the latest.
+    """
+    import re
+
+    pinned = "@playwright/cli@0.1.23"
+    for name in ("lib/cli.js", "start.sh", "start.bat", "start_ui.sh", "start_ui.bat"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        mentions = re.findall(r"@playwright/cli(?:@[\w.]+)?", text)
+        assert mentions, name
+        assert all(m == pinned for m in mentions), (name, mentions)

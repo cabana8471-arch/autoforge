@@ -59,9 +59,9 @@ REM Ensure playwright-cli is available for browser automation
 where playwright-cli >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo Installing playwright-cli for browser automation...
-    call npm install -g @playwright/cli >nul 2>&1
+    call npm install -g @playwright/cli@0.1.23 >nul 2>&1
     if %ERRORLEVEL% neq 0 (
-        echo Note: Could not install playwright-cli. Install manually: npm install -g @playwright/cli
+        echo Note: Could not install playwright-cli. Install manually: npm install -g @playwright/cli@0.1.23
     )
 )
 
