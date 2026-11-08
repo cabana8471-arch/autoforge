@@ -12,7 +12,7 @@ import logging
 import os
 import re
 import shlex
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Optional
 
 import yaml
@@ -795,6 +795,18 @@ def protected_config_paths(project_dir: Path) -> list[str]:
     return [str(root / relative) for relative in PROJECT_ALLOWLIST_FILES]
 
 
+def cli_absolute_rule(tool: str, path: PurePath, suffix: str = "") -> str:
+    """Claude Code permission rule for an absolute path, e.g. ``Edit(//home/me/x)``.
+
+    In Read/Edit rules ``/x`` is project-relative and ``//x`` absolute; the CLI
+    matches Windows paths in POSIX form (``C:\\Users`` -> ``/c/Users``).
+    """
+    posix = path.as_posix()
+    if len(posix) >= 2 and posix[1] == ":":
+        posix = f"/{posix[0].lower()}{posix[2:]}"
+    return f"{tool}(/{posix}{suffix})"
+
+
 def load_project_commands(project_dir: Path) -> Optional[dict]:
     """
     Load allowed commands from project-specific YAML config.
@@ -813,9 +825,16 @@ def load_project_commands(project_dir: Path) -> Optional[dict]:
     if not config_path.exists():
         return None
 
+    from api.safe_project_io import UnsafeProjectPathError, read_project_text
+
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        # Never through a link: one planted by the agent in an earlier run would point
+        # the allowlist at a file the agent can write
+        try:
+            config = yaml.safe_load(read_project_text(project_dir.resolve(), config_path))
+        except UnsafeProjectPathError as e:
+            logger.warning(f"Project config at {config_path} refused ({e}); using no project commands")
+            return None
 
         if not config:
             logger.warning(f"Project config at {config_path} is empty")

@@ -16,13 +16,13 @@ Run with: python -m pytest test_allowlist_protection.py
 
 import asyncio
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from security import protected_config_paths, validate_bash_tool_use
+from security import cli_absolute_rule, load_project_commands, protected_config_paths, validate_bash_tool_use
 
 
 class _AbortingClient:
@@ -109,7 +109,7 @@ def test_agent_settings_deny_the_allowlist(project: Path) -> None:
     settings = json.loads((project / ".autoforge" / ".claude_settings.json").read_text(encoding="utf-8"))
     protected = protected_config_paths(project)
     assert settings["sandbox"]["filesystem"]["denyWrite"] == protected
-    assert settings["permissions"]["deny"] == [f"Edit(/{path})" for path in protected]
+    assert settings["permissions"]["deny"] == [cli_absolute_rule("Edit", Path(path)) for path in protected]
     # The CLI ignores Write/Glob/Grep(...) rules (only Edit and Read rules match file tools) and warns
     assert not any(rule.startswith(("Write(", "Glob(", "Grep(")) for rule in settings["permissions"]["allow"])
 
@@ -132,6 +132,32 @@ def test_extra_read_paths_are_absolute_read_rules(project: Path, tmp_path: Path,
     assert f"Read(/{docs.resolve().as_posix()}/**)" in settings["permissions"]["allow"]
 
 
+def test_absolute_rule_on_posix() -> None:
+    assert cli_absolute_rule("Edit", PurePosixPath("/home/a/p/x.yaml")) == "Edit(//home/a/p/x.yaml)"
+
+
+def test_absolute_rule_on_windows_uses_the_cli_drive_form() -> None:
+    # The CLI matches Windows paths in POSIX form: C:\Users\a -> /c/Users/a
+    assert cli_absolute_rule("Edit", PureWindowsPath(r"C:\Users\a\p\x.yaml")) == "Edit(//c/Users/a/p/x.yaml)"
+    assert cli_absolute_rule("Read", PureWindowsPath(r"D:\docs"), "/**") == "Read(//d/docs/**)"
+
+
+def test_symlinked_allowlist_is_not_loaded(project: Path, tmp_path: Path) -> None:
+    """A link planted in an earlier run must not point the allowlist at an agent-writable file."""
+    planted = tmp_path / "agent-file.yaml"
+    planted.write_text("version: 1\ncommands:\n  - name: python3\n")
+    allowlist = project / ".autoforge" / "allowed_commands.yaml"
+    allowlist.unlink()
+    allowlist.symlink_to(planted)
+    assert load_project_commands(project) is None
+
+
+def test_regular_allowlist_still_loads(project: Path) -> None:
+    (project / ".autoforge" / "allowed_commands.yaml").write_text("version: 1\ncommands:\n  - name: swift\n")
+    config = load_project_commands(project)
+    assert config is not None and config["commands"] == [{"name": "swift"}]
+
+
 def test_spec_chat_settings_deny_the_allowlist(project: Path) -> None:
     from server.services import spec_chat_session
 
@@ -149,5 +175,5 @@ def test_spec_chat_settings_deny_the_allowlist(project: Path) -> None:
 
     settings = json.loads((project / ".autoforge" / ".claude_settings.json").read_text(encoding="utf-8"))
     for path in protected_config_paths(project):
-        assert f"Edit(/{path})" in settings["permissions"]["deny"]
+        assert cli_absolute_rule("Edit", Path(path)) in settings["permissions"]["deny"]
     assert not any(rule.startswith(("Write(", "Glob(")) for rule in settings["permissions"]["allow"])

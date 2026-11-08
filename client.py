@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from env_constants import find_claude_cli
 from quality_gates import QUALITY_GATE_ENV_VARS
-from security import SENSITIVE_DIRECTORIES, bash_security_hook, protected_config_paths
+from security import SENSITIVE_DIRECTORIES, bash_security_hook, cli_absolute_rule, protected_config_paths
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -414,15 +414,15 @@ def create_client(
     # Paths are validated, canonicalized, and checked against sensitive blocklist
     extra_read_paths = get_extra_read_paths()
     for path in extra_read_paths:
-        # Read-only access for each validated path; "//" marks an absolute path
-        # ("/x" would be relative to the project), Read rules cover Glob and Grep
-        permissions_list.append(f"Read(/{path.as_posix()}/**)")
+        # Read-only access for each validated path (an absolute rule: "Read(/x)" would be
+        # relative to the project); Read rules cover Glob and Grep
+        permissions_list.append(cli_absolute_rule("Read", path, "/**"))
 
     # Create comprehensive security settings
     # Note: Using relative paths ("./**") restricts access to project directory
     # since cwd is set to project_dir
     # The project allowlist widens what the agent may run: only the user edits it.
-    # Edit deny blocks the file tools ("//" = absolute path); denyWrite makes it
+    # Edit deny blocks the file tools (through symlinks too); denyWrite makes it
     # read-only for sandboxed Bash, interpreters included.
     protected_files = protected_config_paths(project_dir)
     security_settings = {
@@ -434,7 +434,7 @@ def create_client(
         "permissions": {
             "defaultMode": "acceptEdits",  # Auto-approve edits within allowed directories
             "allow": permissions_list,
-            "deny": [f"Edit(/{path})" for path in protected_files],
+            "deny": [cli_absolute_rule("Edit", Path(path)) for path in protected_files],
         },
     }
 
