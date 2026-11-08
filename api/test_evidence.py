@@ -15,6 +15,7 @@ before being served, so a stored path can never be used to read files outside
 the project.
 """
 
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,12 +61,54 @@ def get_evidence_dir(project_dir: Path, feature_id: int) -> Path:
     return get_autoforge_dir(project_dir.resolve()) / "evidence" / f"feature_{feature_id}"
 
 
-def _safe_evidence_dir(project_dir: Path, feature_id: int) -> Path | None:
-    """The feature's evidence directory, or None when reaching it would follow a symlink.
+# Where the OS supports it, evidence files are created and deleted relative to a
+# directory descriptor opened component by component with O_NOFOLLOW. The coding
+# agent can create symlinks inside the project at any moment (also between a path
+# check and its use), and this code runs outside the agent's sandbox, so a
+# check-then-use on path names is not enough.
+_DIR_FD_SUPPORTED = (
+    hasattr(os, "O_NOFOLLOW")
+    and hasattr(os, "O_DIRECTORY")
+    and os.open in os.supports_dir_fd
+    and os.mkdir in os.supports_dir_fd
+    and os.unlink in os.supports_dir_fd
+)
 
-    The coding agent can create symlinks inside the project; this server runs
-    outside its sandbox, so it must never write or delete through one. The path
-    is accepted only when resolving it changes nothing below the project root.
+
+def _open_evidence_dir(project_dir: Path, feature_id: int, create: bool) -> int | None:
+    """Open the feature's evidence directory without following any symlink below the project root.
+
+    Returns:
+        A directory file descriptor (the caller closes it), or None when a
+        component is missing (and ``create`` is False), is a symlink or is not
+        a directory.
+    """
+    root = project_dir.resolve()
+    parts = get_evidence_dir(project_dir, feature_id).relative_to(root).parts
+    try:
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return None
+    try:
+        for name in parts:
+            if create:
+                try:
+                    os.mkdir(name, 0o755, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            next_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except OSError:
+        os.close(fd)
+        return None
+
+
+def _safe_evidence_dir(project_dir: Path, feature_id: int) -> Path | None:
+    """Path-based fallback for platforms without dir_fd support (e.g. Windows).
+
+    Accepts the directory only when resolving it changes nothing below the project root.
     """
     expected = get_evidence_dir(project_dir, feature_id)
     if expected.resolve() != expected:
@@ -81,30 +124,77 @@ def prune_evidence_dir(project_dir: Path, feature_id: int, keep: list[str]) -> N
         feature_id: The feature whose evidence directory is pruned
         keep: Project-relative screenshot paths of the evidence currently stored
     """
-    evidence_dir = _safe_evidence_dir(project_dir, feature_id)
-    if evidence_dir is None or not evidence_dir.is_dir():
-        return
     root = project_dir.resolve()
-    kept = {(root / path) for path in keep if isinstance(path, str)}
-    for entry in evidence_dir.iterdir():
-        if entry not in kept and (entry.is_symlink() or entry.is_file()):
+    evidence_dir = get_evidence_dir(project_dir, feature_id)
+    kept = {Path(path).name for path in keep if isinstance(path, str) and (root / path).parent == evidence_dir}
+
+    if _DIR_FD_SUPPORTED:
+        fd = _open_evidence_dir(project_dir, feature_id, create=False)
+        if fd is None:
+            return
+        try:
+            with os.scandir(fd) as entries:
+                names = [e.name for e in entries if not e.is_dir(follow_symlinks=False)]
+            for name in names:
+                if name not in kept:
+                    try:
+                        os.unlink(name, dir_fd=fd)  # removes a symlink itself, never its target
+                    except OSError:
+                        pass
+        finally:
+            os.close(fd)
+        return
+
+    safe_dir = _safe_evidence_dir(project_dir, feature_id)
+    if safe_dir is None or not safe_dir.is_dir():
+        return
+    for entry in safe_dir.iterdir():
+        if entry.name not in kept and (entry.is_symlink() or entry.is_file()):
             try:
                 entry.unlink()
             except OSError:
                 pass
 
 
-def _persist_screenshot(source: Path, dest_dir: Path, stamp: str, index: int) -> Path:
-    """Copy a screenshot into the evidence directory (no-op if it already lives there)."""
-    try:
-        source.relative_to(dest_dir)
-        return source
-    except ValueError:
-        pass
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / f"{stamp}_{index}_{source.name}"
-    shutil.copy2(source, dest)
-    return dest
+class _EvidenceWriter:
+    """Copies screenshots into one feature's evidence directory, opened lazily at the first copy."""
+
+    def __init__(self, project_dir: Path, feature_id: int):
+        self.project_dir = project_dir
+        self.feature_id = feature_id
+        self.dir_path = get_evidence_dir(project_dir, feature_id)
+        self._fd: int | None = None
+        self._opened = False
+        self.unsafe = False
+
+    def copy(self, source: Path, name: str) -> Path | None:
+        """Copy ``source`` into the directory as ``name``; None when it cannot be reached safely."""
+        if not _DIR_FD_SUPPORTED:
+            safe_dir = _safe_evidence_dir(self.project_dir, self.feature_id)
+            if safe_dir is None:
+                self.unsafe = True
+                return None
+            safe_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, safe_dir / name)
+            return safe_dir / name
+
+        if not self._opened:
+            self._opened = True
+            self._fd = _open_evidence_dir(self.project_dir, self.feature_id, create=True)
+            self.unsafe = self._fd is None
+        if self._fd is None:
+            return None
+        src_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(src_fd, "rb") as src:
+            dst_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=self._fd)
+            with os.fdopen(dst_fd, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        return self.dir_path / name
+
+    def close(self) -> None:
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
 
 
 def build_test_evidence(
@@ -139,30 +229,36 @@ def build_test_evidence(
     root = project_dir.resolve()
     now = datetime.now(timezone.utc)
     stamp = now.strftime("%Y%m%dT%H%M%S%f")
-    dest_dir = _safe_evidence_dir(project_dir, feature_id)
+    writer = _EvidenceWriter(project_dir, feature_id)
     accepted: list[str] = []
     seen: set[Path] = set()
     warnings: list[str] = []
-    if dest_dir is None and screenshots:
-        warnings.append("Screenshots were not copied: the evidence folder path contains a symlink")
-    for raw in (screenshots or [])[:MAX_SCREENSHOTS]:
-        resolved = resolve_screenshot_path(project_dir, raw) if isinstance(raw, str) else None
-        if resolved is None:
-            warnings.append(f"Ignored screenshot '{raw}': must be an image file inside the project directory")
-            continue
-        if not resolved.is_file():
-            warnings.append(f"Ignored screenshot '{raw}': file not found")
-            continue
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        stored = resolved
-        if dest_dir is not None:
-            try:
-                stored = _persist_screenshot(resolved, dest_dir, stamp, len(accepted))
-            except OSError as e:
-                warnings.append(f"Could not copy screenshot '{raw}' into evidence folder: {e}")
-        accepted.append(stored.relative_to(root).as_posix())
+    try:
+        for raw in (screenshots or [])[:MAX_SCREENSHOTS]:
+            resolved = resolve_screenshot_path(project_dir, raw) if isinstance(raw, str) else None
+            if resolved is None:
+                warnings.append(f"Ignored screenshot '{raw}': must be an image file inside the project directory")
+                continue
+            if not resolved.is_file():
+                warnings.append(f"Ignored screenshot '{raw}': file not found")
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            stored = resolved
+            if resolved.parent != writer.dir_path:  # already in the evidence folder: keep as is
+                try:
+                    copied = writer.copy(resolved, f"{stamp}_{len(accepted)}_{resolved.name}")
+                except OSError as e:
+                    warnings.append(f"Could not copy screenshot '{raw}' into evidence folder: {e}")
+                else:
+                    if copied is not None:
+                        stored = copied
+            accepted.append(stored.relative_to(root).as_posix())
+        if writer.unsafe:
+            warnings.append("Screenshots were not copied: the evidence folder path contains a symlink")
+    finally:
+        writer.close()
 
     if not summary and not log and not accepted:
         return None, warnings

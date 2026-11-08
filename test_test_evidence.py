@@ -168,6 +168,66 @@ class TestBuildTestEvidence:
         assert evidence["screenshots"] == [".playwright-cli/page.png"]
         assert len(warnings) == 1
 
+    def test_symlink_swapped_in_after_the_check_is_not_followed(self, project_dir, screenshot, tmp_path, monkeypatch):
+        # Race: a background process of the agent replaces the evidence folder with a
+        # symlink after any up-front path check. Writes must still stay inside the project.
+        import api.test_evidence as te
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        evidence_root = project_dir / ".autoforge" / "evidence"
+        evidence_root.mkdir(parents=True)
+        real_resolve = te.resolve_screenshot_path
+
+        def resolve_then_swap(project, raw):
+            result = real_resolve(project, raw)
+            if evidence_root.is_dir() and not evidence_root.is_symlink():
+                evidence_root.rmdir()
+                evidence_root.symlink_to(outside, target_is_directory=True)
+            return result
+
+        monkeypatch.setattr(te, "resolve_screenshot_path", resolve_then_swap)
+        evidence, warnings = build_test_evidence(project_dir, 5, "passing", screenshots=[".playwright-cli/page.png"])
+
+        assert list(outside.iterdir()) == []
+        assert evidence["screenshots"] == [".playwright-cli/page.png"]
+        assert warnings
+
+    @pytest.mark.parametrize("level", ["autoforge", "evidence", "feature"])
+    def test_prune_never_deletes_through_a_symlinked_component(self, project_dir, tmp_path, level):
+        outside = tmp_path / "outside"
+        target = outside / "evidence" / "feature_4" if level == "autoforge" else (
+            outside / "feature_4" if level == "evidence" else outside)
+        target.mkdir(parents=True)
+        (target / "keep.png").write_bytes(PNG_BYTES)
+        link = {"autoforge": project_dir / ".autoforge",
+                "evidence": project_dir / ".autoforge" / "evidence",
+                "feature": project_dir / ".autoforge" / "evidence" / "feature_4"}[level]
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside if level != "feature" else outside, target_is_directory=True)
+
+        prune_evidence_dir(project_dir, 4, [])
+
+        assert (target / "keep.png").exists()
+
+    def test_path_fallback_copies_and_refuses_symlinked_dir(self, project_dir, screenshot, tmp_path, monkeypatch):
+        # Platforms without dir_fd support (Windows) use the path-based check
+        import api.test_evidence as te
+
+        monkeypatch.setattr(te, "_DIR_FD_SUPPORTED", False)
+        evidence, warnings = build_test_evidence(project_dir, 6, "passing", screenshots=[".playwright-cli/page.png"])
+        assert warnings == []
+        assert evidence["screenshots"][0].startswith(".autoforge/evidence/feature_6/")
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (project_dir / ".autoforge" / "evidence" / "feature_7").symlink_to(outside, target_is_directory=True)
+        evidence, warnings = build_test_evidence(project_dir, 7, "passing", screenshots=[".playwright-cli/page.png"])
+        assert list(outside.iterdir()) == []
+        assert evidence["screenshots"] == [".playwright-cli/page.png"]
+        prune_evidence_dir(project_dir, 6, [])
+        assert list((project_dir / ".autoforge" / "evidence" / "feature_6").iterdir()) == []
+
     def test_prune_keeps_only_referenced_copies(self, project_dir):
         evidence_dir = project_dir / ".autoforge" / "evidence" / "feature_4"
         evidence_dir.mkdir(parents=True)

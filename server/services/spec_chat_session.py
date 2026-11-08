@@ -512,18 +512,21 @@ class SpecChatSession:
         """Persist the conversation so far to spec_input_summary.md (best effort)."""
         if self._summary_path is None:
             return
-        if self._summary_path.is_symlink():
-            # Never follow a symlink the agent could have planted out of the project
+        content = render_spec_conversation_markdown(
+            self.project_name, self.messages, self.created_at, self.complete
+        ).encode("utf-8")
+        # Never follow a symlink the agent could have planted out of the project.
+        # O_NOFOLLOW refuses it at open time (no check-then-write race); without
+        # it (Windows) fall back to checking first.
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        if not nofollow and self._summary_path.is_symlink():
             logger.warning(f"Not writing spec conversation summary: {self._summary_path} is a symlink")
             return
         try:
             self._summary_path.parent.mkdir(parents=True, exist_ok=True)
-            self._summary_path.write_text(
-                render_spec_conversation_markdown(
-                    self.project_name, self.messages, self.created_at, self.complete
-                ),
-                encoding="utf-8",
-            )
+            fd = os.open(self._summary_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | nofollow, 0o644)
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
         except OSError as e:
             logger.warning(f"Failed to write spec conversation summary: {e}")
 
