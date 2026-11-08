@@ -37,7 +37,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional, TextIO, cast
 
-from api.database import fall_back_to_rollback_journal, is_wal_io_error, select_journal_mode
+from api.database import (
+    fall_back_to_rollback_journal,
+    is_wal_io_error,
+    prepare_project_database_dir,
+    select_journal_mode,
+)
 from api.safe_project_io import open_project_file_for_write
 from autoforge_paths import get_logs_db_path
 
@@ -312,8 +317,8 @@ class StructuredLogger:
         self.agent_id = agent_id
         self.db_path = get_logs_db_path(self.project_dir)
 
-        # Ensure directory exists
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure directory exists; refuse a logs.db the agent redirected with a link
+        prepare_project_database_dir(self.project_dir, self.db_path)
 
         # Setup logger with unique name per instance to avoid handler accumulation
         # across tests and multiple invocations. Include project path hash for uniqueness.
@@ -739,8 +744,9 @@ def get_log_query(project_dir: Path) -> LogQuery:
         LogQuery instance
     """
     db_path = get_logs_db_path(Path(project_dir))
+    # Refuse a logs.db the agent redirected with a link (clear error)
+    prepare_project_database_dir(Path(project_dir), db_path)
     if not db_path.exists():
         # No agent has logged yet: create an empty schema so queries return no rows
-        db_path.parent.mkdir(parents=True, exist_ok=True)
         _init_log_database(db_path)
     return LogQuery(db_path)

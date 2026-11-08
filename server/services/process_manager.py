@@ -267,8 +267,9 @@ class AgentProcessManager:
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
 
-            from api.database import Feature
+            from api.database import Feature, check_project_database_path
 
+            check_project_database_path(self.project_dir, features_db)  # refused -> logged below
             engine = create_engine(f"sqlite:///{features_db}")
             Session = sessionmaker(bind=engine)
             session = Session()

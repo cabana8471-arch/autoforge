@@ -101,6 +101,9 @@ def get_engine(project_dir: Path):
         # Check again inside the lock in case another thread created it
         if cache_key not in _engine_cache:
             db_path = get_db_path(project_dir)
+            # Refuse an assistant.db the agent redirected with a link (clear error)
+            from api.database import check_project_database_path
+            check_project_database_path(project_dir, db_path)
             # Use as_posix() for cross-platform compatibility with SQLite connection strings
             db_url = f"sqlite:///{db_path.as_posix()}"
             engine = create_engine(

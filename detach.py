@@ -764,6 +764,9 @@ def _checkpoint_databases(project_dir: Path) -> None:
         db_file = project_dir / db_name
         if db_file.exists():
             try:
+                from api.database import check_project_database_path
+                # TRUNCATE writes the -wal file: never through a planted link
+                check_project_database_path(project_dir, db_file)
                 conn = sqlite3.connect(str(db_file))
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 conn.close()

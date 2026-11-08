@@ -241,6 +241,49 @@ def get_database_url(project_dir: Path) -> str:
     return f"sqlite:///{db_path.as_posix()}"
 
 
+# Files SQLite creates next to a database and opens by path, following symlinks
+SQLITE_COMPANION_SUFFIXES = ("-wal", "-shm", "-journal")
+
+
+def check_project_database_path(project_dir: Path, db_path: Path) -> None:
+    """Refuse a project SQLite database (features.db, assistant.db, logs.db) behind a planted link.
+
+    The agent can plant symlinks and hard links in the project. SQLite opens the
+    database and its -wal/-shm/-journal files by path and follows symlinks, so a
+    link at any of them, or a symlinked directory above them, would make the
+    server read and write a database outside the project. Missing files are fine
+    (SQLite creates them); existing ones must be regular files with a single link.
+    The check runs before the database is opened; a link planted after it is not
+    caught.
+
+    Raises:
+        UnsafeProjectPathError: with a message naming the refused database
+    """
+    from api.safe_project_io import UnsafeProjectPathError, check_project_file
+
+    for path in (db_path, *(db_path.with_name(db_path.name + suffix) for suffix in SQLITE_COMPANION_SUFFIXES)):
+        try:
+            check_project_file(project_dir, path)
+        except UnsafeProjectPathError as e:
+            raise UnsafeProjectPathError(
+                f"Refusing to open the project database {db_path}: {e}. "
+                "Remove the link (it could redirect the database outside the project) and retry."
+            ) from e
+
+
+def prepare_project_database_dir(project_dir: Path, db_path: Path) -> None:
+    """Create the database's directory below the project (never through a symlink) and check the database.
+
+    Raises:
+        UnsafeProjectPathError: see ``check_project_database_path``
+    """
+    from api.safe_project_io import make_project_dirs
+
+    if db_path.parent != project_dir and db_path.parent != project_dir.resolve():
+        make_project_dirs(project_dir, db_path.parent)
+    check_project_database_path(project_dir, db_path)
+
+
 def _migrate_add_in_progress_column(engine) -> None:
     """Add in_progress column to existing databases that don't have it."""
     with engine.connect() as conn:
@@ -447,6 +490,13 @@ def _probe_wal_support(db_dir: Path) -> bool:
     # Per-process file name so concurrent probes don't interfere with each other
     probe_path = db_dir / f".wal-probe-{os.getpid()}.db"
     supported = False
+    # The name is predictable: remove anything planted there (a symlink is removed
+    # itself) so SQLite creates fresh files instead of following a link
+    for suffix in ("", *SQLITE_COMPANION_SUFFIXES):
+        try:
+            Path(f"{probe_path}{suffix}").unlink()
+        except OSError:
+            pass
     try:
         conn = sqlite3.connect(str(probe_path), timeout=5)
         try:
@@ -697,9 +747,10 @@ def create_database(project_dir: Path) -> tuple:
 
     db_url = get_database_url(project_dir)
 
-    # Ensure parent directory exists (for .autoforge/ layout)
+    # Ensure parent directory exists (for .autoforge/ layout); refuse a database
+    # the agent redirected with a link (a clear error, never a fresh empty one)
     db_path = get_database_path(project_dir)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    prepare_project_database_dir(project_dir, db_path)
 
     # Choose journal mode based on filesystem type
     # WAL mode doesn't work reliably on network filesystems and can cause corruption.

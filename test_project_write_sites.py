@@ -409,7 +409,8 @@ def test_layout_migration_db_copy_not_written_through_dangling_symlink(project: 
     autoforge_paths.migrate_project_layout(project)
 
     assert _outside_names(outside) == set()
-    assert not (project / ".autoforge" / "features.db").is_symlink()
+    # The database check refuses the planted link (logged); the root database stays put
+    assert (project / "features.db").exists()
 
 
 def test_layout_migration_does_not_copy_linked_prompt_contents(project: Path, outside: Path) -> None:

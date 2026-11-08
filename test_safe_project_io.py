@@ -339,6 +339,26 @@ def test_read_project_text_normalizes_newlines_and_refuses_links(root, outside):
         sio.read_project_text(root, root / "link.md")
 
 
+@pytest.mark.parametrize("dir_fd", [True, False])
+def test_check_project_file(root, outside, monkeypatch, dir_fd):
+    monkeypatch.setattr(sio, "DIR_FD_SUPPORTED", dir_fd)
+    (outside / "x").write_bytes(b"x")
+    (root / "real.db").write_bytes(b"")
+    (root / "link.db").symlink_to(outside / "x")
+    (root / "dir").mkdir()
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+
+    assert sio.check_project_file(root, root / "real.db") is True
+    assert sio.check_project_file(root, root / "missing.db") is False
+    assert sio.check_project_file(root, root / "nodir" / "x.db") is False
+    for bad in (root / "link.db", root / "dir", root / "linked" / "x"):
+        with pytest.raises(sio.UnsafeProjectPathError):
+            sio.check_project_file(root, bad)
+    os.link(outside / "x", root / "hard.db")
+    with pytest.raises(sio.UnsafeProjectPathError):
+        sio.check_project_file(root, root / "hard.db")
+
+
 def _make_tree(base, outside):
     (base / "sub").mkdir(parents=True)
     (base / "sub" / "a.txt").write_bytes(b"a")

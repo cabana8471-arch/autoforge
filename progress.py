@@ -14,6 +14,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+from api.safe_project_io import UnsafeProjectPathError
+
 WEBHOOK_URL = os.environ.get("PROGRESS_N8N_WEBHOOK_URL")
 PROGRESS_CACHE_FILE = ".progress_cache"
 
@@ -22,18 +24,24 @@ SQLITE_TIMEOUT = 30  # seconds to wait for locks
 SQLITE_BUSY_TIMEOUT_MS = 30000  # milliseconds for PRAGMA busy_timeout
 
 
-def _get_connection(db_file: Path) -> sqlite3.Connection:
+def _get_connection(project_dir: Path, db_file: Path) -> sqlite3.Connection:
     """Get a SQLite connection with proper timeout settings.
 
     Uses timeout=30s and PRAGMA busy_timeout=30000 for safe operation
     in parallel mode where multiple processes access the same database.
 
     Args:
+        project_dir: Project directory holding the database
         db_file: Path to the SQLite database file
 
     Returns:
         sqlite3.Connection with proper timeout settings
+
+    Raises:
+        UnsafeProjectPathError: the database is reachable only through a planted link
     """
+    from api.database import check_project_database_path
+    check_project_database_path(project_dir, db_file)
     conn = sqlite3.connect(db_file, timeout=SQLITE_TIMEOUT)
     conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     return conn
@@ -65,11 +73,13 @@ def has_features(project_dir: Path) -> bool:
         return False
 
     try:
-        with closing(_get_connection(db_file)) as conn:
+        with closing(_get_connection(project_dir, db_file)) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM features")
             count: int = cursor.fetchone()[0]
             return bool(count > 0)
+    except UnsafeProjectPathError:
+        raise  # a clear error, not "no features" (which would start the initializer)
     except Exception:
         # Database exists but can't be read or has no features table
         return False
@@ -93,7 +103,7 @@ def count_passing_tests(project_dir: Path) -> tuple[int, int, int, int]:
         return 0, 0, 0, 0
 
     try:
-        with closing(_get_connection(db_file)) as conn:
+        with closing(_get_connection(project_dir, db_file)) as conn:
             cursor = conn.cursor()
             # Single aggregate query instead of separate COUNT queries
             # Handle case where columns don't exist yet (legacy DBs)
@@ -162,7 +172,7 @@ def get_all_passing_features(project_dir: Path) -> list[dict]:
         return []
 
     try:
-        with closing(_get_connection(db_file)) as conn:
+        with closing(_get_connection(project_dir, db_file)) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT id, category, name FROM features WHERE passes = 1 ORDER BY priority ASC"
@@ -284,7 +294,7 @@ def clear_stuck_features(project_dir: Path) -> int:
         return 0
 
     try:
-        with closing(_get_connection(db_file)) as conn:
+        with closing(_get_connection(project_dir, db_file)) as conn:
             cursor = conn.cursor()
 
             # Count how many will be cleared

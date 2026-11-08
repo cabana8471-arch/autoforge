@@ -320,6 +320,7 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
         An empty list means nothing was migrated (either everything is
         already migrated, the agent is running, or ``.autoforge`` is a symlink).
     """
+    from api.database import check_project_database_path
     from api.safe_project_io import read_project_file, write_project_file
 
     # Safety: refuse to migrate while an agent is running
@@ -376,6 +377,9 @@ def migrate_project_layout(project_dir: Path) -> list[str]:
             old_db = project_dir / db_name
             new_db = autoforge_dir / db_name
             if old_db.exists() and not old_db.is_symlink() and not new_db.exists():
+                # SQLite follows links at the -wal/-shm files and at new_db's companions
+                check_project_database_path(project_dir, old_db)
+                check_project_database_path(project_dir, new_db)
                 # Flush WAL to ensure all data is in the main database file
                 conn = sqlite3.connect(str(old_db))
                 try:

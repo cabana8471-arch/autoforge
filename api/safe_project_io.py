@@ -349,6 +349,46 @@ def read_project_file(project_dir: Path, target: Path) -> bytes:
     return _refuse_symlinks(project_dir, relative).read_bytes()
 
 
+def check_project_file(project_dir: Path, target: Path) -> bool:
+    """Check that ``target`` (below ``project_dir``) is a plain project file, if it exists.
+
+    For files that another library opens by path (SQLite): no component below the
+    project may be a symlink, and an existing target must be a regular file with a
+    single link. The check cannot hold the file open for that library, so a link
+    planted between this check and its open is not caught.
+
+    Returns:
+        True when the target exists, False when it (or one of its parents) is missing.
+
+    Raises:
+        UnsafeProjectPathError: outside the project, a symlinked component, or the
+            target is a symlink, a non-regular file or has more than one link
+    """
+    relative = _project_relative(project_dir, target)
+    if DIR_FD_SUPPORTED:
+        try:
+            dir_fd = _walk_dirs(project_dir.resolve(), relative.parts[:-1], create=False)
+        except FileNotFoundError:
+            return False
+        try:
+            st = os.stat(relative.name, dir_fd=dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        finally:
+            os.close(dir_fd)
+    else:
+        _refuse_symlinks(project_dir, relative.parent)
+        try:
+            st = (project_dir / relative).lstat()
+        except FileNotFoundError:
+            return False
+    if stat.S_ISLNK(st.st_mode):
+        raise UnsafeProjectPathError(f"{target} is a symlink")
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+        raise UnsafeProjectPathError(f"{target} is not a regular file with a single link")
+    return True
+
+
 def read_project_text(project_dir: Path, target: Path, errors: str = "strict") -> str:
     """``read_project_file`` decoded as UTF-8, newlines normalized like ``Path.read_text``.
 
