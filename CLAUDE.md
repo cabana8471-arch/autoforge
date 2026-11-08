@@ -354,6 +354,10 @@ Defense-in-depth approach configured in `client.py`:
 2. Filesystem restricted to project directory only
 3. Bash commands validated using hierarchical allowlist system
 
+**Linux: no `playwright-cli` inside the agent sandbox.** The sandbox blocks Unix sockets on Linux (seccomp, no per-path exception: `sandbox.network.allowUnixSockets` is macOS-only), so the `playwright-cli` daemon cannot start and the feature modal's Live Browser view gets no screenshots. Agents fall back to `playwright-core` directly. This is deliberate (user decision 08.11.2026): `allowAllUnixSockets` would open every Unix socket (docker, ssh-agent) and `excludedCommands: playwright-cli` would run it unsandboxed with an agent-writable `.playwright/cli.config.json`.
+
+**Out-of-sandbox file access** goes through `api/safe_project_io.py` (no symlinks, hard links or junctions followed), so a link inside a project is refused even when the user made it; replace it with the real file.
+
 #### Extra Read Paths (Cross-Project File Access)
 
 The agent can optionally read files from directories outside the project folder via the `EXTRA_READ_PATHS` environment variable. This enables referencing documentation, shared libraries, or other projects.

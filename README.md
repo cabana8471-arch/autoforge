@@ -476,6 +476,12 @@ Set your API key via `ANTHROPIC_API_KEY` environment variable or the Settings UI
 **"Appears to hang on first run"**
 This is normal. The initializer agent is generating detailed test cases, which takes significant time. Watch for `[Tool: ...]` output to confirm the agent is working.
 
+**Live Browser view stays empty on Linux**
+On Linux the agent sandbox blocks Unix sockets, so the `playwright-cli` daemon cannot start inside it and there is nothing to stream; agents test with `playwright-core` instead. Opening the sandbox for it would weaken it (every Unix socket, or running `playwright-cli` unsandboxed), so AutoForge leaves it closed.
+
+**"Refusing to open/load ..." for a project file**
+AutoForge never follows a symlink or hard link inside a project when it works outside the agent sandbox, even one you created. Replace the link with the real file.
+
 **"Command blocked by security hook"**
 The agent tried to run a command not in the allowlist. This is the security system working as intended. If needed, add the command to `ALLOWED_COMMANDS` in `security.py`.
 
