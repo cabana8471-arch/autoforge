@@ -163,7 +163,7 @@ def test_feature_create_bulk_returns_feature_ids(tmp_path, monkeypatch):
 
 
 def test_parse_bulk_wrapped_in_fastmcp_result():
-    # FastMCP wraps a tool's string return value as {"result": "<json>"}
+    # MCPServer (FastMCP in mcp 1.x) wraps a tool's string return value as {"result": "<json>"}
     # (seen in a real expand session: server log line for feature_create_bulk)
     inner = json.dumps({"created": 2, "with_dependencies": 0, "feature_ids": [2, 3]})
     result = _text_content({"result": inner})

@@ -40,7 +40,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -152,7 +152,7 @@ _engine = None
 
 
 @asynccontextmanager
-async def server_lifespan(server: FastMCP):
+async def server_lifespan(server: MCPServer):
     """Initialize database on startup, cleanup on shutdown."""
     global _session_maker, _engine
 
@@ -192,7 +192,7 @@ async def server_lifespan(server: FastMCP):
 
 
 # Initialize the MCP server
-mcp = FastMCP("features", lifespan=server_lifespan)
+mcp = MCPServer("features", lifespan=server_lifespan)
 
 
 def get_session():

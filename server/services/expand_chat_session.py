@@ -89,7 +89,7 @@ def parse_created_features(
     """
     try:
         result = json.loads(_tool_result_text(result_content))
-        # FastMCP wraps a tool's string return value as {"result": "<json>"}
+        # MCPServer (FastMCP in mcp 1.x) wraps a tool's string return value as {"result": "<json>"}
         if isinstance(result, dict) and set(result) == {"result"} and isinstance(result["result"], str):
             result = json.loads(result["result"])
     except (TypeError, ValueError):

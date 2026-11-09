@@ -1,9 +1,9 @@
 # Production runtime dependencies only
 # For development, use requirements.txt (includes ruff, mypy, pytest)
 claude-agent-sdk>=0.2.179,<0.3.0
-# feature_mcp.py and expand_chat_session.py use the mcp 1.x FastMCP API (renamed to
-# MCPServer in mcp 2.x); claude-agent-sdk 0.2.x itself accepts mcp <3.0.0
-mcp>=1.19.0,<2.0.0
+# feature_mcp.py uses mcp.server.mcpserver.MCPServer (FastMCP before mcp 2.x);
+# claude-agent-sdk 0.2.x accepts mcp <3.0.0
+mcp>=2.3.0,<3.0.0
 python-dotenv>=1.0.0
 sqlalchemy>=2.0.0
 fastapi>=0.115.0

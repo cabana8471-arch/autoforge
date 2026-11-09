@@ -9,6 +9,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Fork documentation (FORK_README.md, FORK_CHANGELOG.md)
 - Configuration system via `.autocoder/config.json`
 
+## [2026-11-09] Current Claude models and dependencies
+
+- Settings offer Claude Opus 5.5 (default), Sonnet 5.5, Haiku 5.5 and Fable 5.1 ("highest cost"),
+  with versioned names; stored 4.x model settings migrate to the same tier on 5.5
+- Vertex examples no longer show `claude-3-5-haiku@20241022` (retired 19.02.2026)
+- `claude-agent-sdk` 0.1.81 → 0.2.179; the ignored `context-1m-2025-08-07` beta is no longer sent
+- `mcp` 1.x → 2.3.0: the feature MCP server uses `MCPServer` (formerly `FastMCP`); its sync tools
+  now run on worker threads, which the per-call database sessions already allow
+
 ## [2026-11-08] Integration of the zwanski-start upstream PRs
 
 GitHub user `zwanski-start` opened 92 PRs on the unmaintained upstream `AutoForgeAI/autoforge`
