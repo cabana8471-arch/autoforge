@@ -688,9 +688,7 @@ def get_setting(key: str, default: str | None = None) -> str | None:
 
 
 # Valid Claude Code reasoning/effort levels. Must match the CLI's --effort
-# choices (low, medium, high, xhigh, max) — note: the SDK's Literal type at
-# 0.1.61 omits "xhigh", but the string is forwarded to the CLI as-is and
-# accepted there.
+# choices (low, medium, high, xhigh, max), the same set as the SDK's EffortLevel.
 EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
 VALID_EFFORT_LEVELS: tuple[EffortLevel, ...] = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_EFFORT: EffortLevel = "xhigh"

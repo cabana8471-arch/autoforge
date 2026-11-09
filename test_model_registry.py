@@ -91,3 +91,26 @@ def test_ui_placeholder_defaults_match_the_backend():
     assert placeholder_ids == CURRENT_CLAUDE_MODELS
     assert "'claude-opus-4" not in source and "'claude-sonnet-4" not in source
     assert "default: 'claude-opus-5-5'" in source
+
+
+def test_agents_send_no_context_1m_beta(tmp_path):
+    """Current models have a 1M context by default; the old beta only produced a CLI warning."""
+    from unittest.mock import patch
+
+    import client
+
+    captured: list = []
+
+    class _Capture:
+        def __init__(self, options=None, **_kwargs):
+            captured.append(options)
+
+    project = tmp_path / "p"
+    (project / ".autoforge").mkdir(parents=True)
+    with (
+        patch.object(client, "ClaudeSDKClient", _Capture),
+        patch("registry.get_effective_sdk_env", return_value={}),
+        patch("registry.get_effort_setting", return_value=None),
+    ):
+        client.create_client(project, "claude-opus-5-5")
+    assert not captured[0].betas

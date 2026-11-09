@@ -516,7 +516,6 @@ def create_client(
     # Detect alternative API mode (Ollama, GLM, or Vertex AI)
     base_url = sdk_env.get("ANTHROPIC_BASE_URL", "")
     is_vertex = sdk_env.get("CLAUDE_CODE_USE_VERTEX") == "1"
-    is_alternative_api = bool(base_url) or is_vertex
     is_ollama = "localhost:11434" in base_url or "127.0.0.1:11434" in base_url
     is_azure = "services.ai.azure.com" in base_url
     model = convert_model_for_vertex(model)
@@ -624,9 +623,7 @@ def create_client(
     return ClaudeSDKClient(
         options=ClaudeAgentOptions(
             model=model,
-            # SDK 0.1.61's effort Literal omits "xhigh" but the CLI's
-            # --effort flag accepts it; the SDK forwards the string unchanged.
-            effort=effort,  # type: ignore[arg-type, unused-ignore]
+            effort=effort,
             cli_path=system_cli,  # Use system CLI to avoid bundled Bun crash (exit code 3)
             # Use Claude Code's built-in system prompt and append our role, rather than
             # replacing it (a plain string would drop the CLI's tool-usage guidance).
@@ -656,11 +653,8 @@ def create_client(
             env=sdk_env,  # Pass API configuration overrides to CLI subprocess
             # Pipe CLI stderr through a filter that collapses benign hook AbortError traces
             stderr=CliStderrFilter(),
-            # Enable extended context beta for better handling of long sessions.
-            # This provides up to 1M tokens of context with automatic compaction.
-            # See: https://docs.anthropic.com/en/api/beta-headers
-            # Disabled for alternative APIs (Ollama, GLM, Vertex AI) as they don't support this beta.
-            betas=[] if is_alternative_api else ["context-1m-2025-08-07"],
+            # No context-1m beta: current Claude models have a 1M context by default,
+            # and the CLI ignores custom betas for subscription logins (with a warning).
             # Note on context management:
             # The Claude Agent SDK handles context management automatically through the
             # underlying Claude Code CLI. When context approaches limits, the CLI
@@ -668,9 +662,8 @@ def create_client(
             #
             # The SDK does NOT expose explicit compaction_control or context_management
             # parameters. Instead, context is managed via:
-            # 1. betas=["context-1m-2025-08-07"] - Extended context window
-            # 2. PreCompact hook - Intercept and customize compaction behavior
-            # 3. max_turns - Limit conversation turns (coding=300, testing=100; AUTOFORGE_MAX_TURNS overrides)
+            # 1. PreCompact hook - Intercept and customize compaction behavior
+            # 2. max_turns - Limit conversation turns (coding=300, testing=100; AUTOFORGE_MAX_TURNS overrides)
             #
             # Future SDK versions may add explicit compaction controls. When available,
             # consider adding:
