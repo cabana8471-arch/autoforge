@@ -11,7 +11,7 @@
 #   3. Global settings (approval timeout, etc.)
 #
 # Use this to:
-#   - Add commands that ALL your projects need (jq, python3, etc.)
+#   - Add commands that ALL your projects need (jq, make, etc.)
 #   - Block dangerous commands across ALL projects (aws, kubectl, etc.)
 #   - Enforce organization-wide security policies
 
@@ -31,9 +31,6 @@ allowed_commands: []
   # Common development utilities
   # - name: jq
   #   description: JSON processor for API responses
-
-  # - name: python3
-  #   description: Python 3 interpreter
 
   # - name: pip3
   #   description: Python package installer
@@ -135,7 +132,7 @@ approval_timeout_minutes: 5
 
 # Startup / Small Team (permissive):
 # allowed_commands:
-#   - name: python3
+#   - name: uv
 #   - name: jq
 # blocked_commands: []  # Empty - rely on hardcoded blocklist only
 
@@ -154,7 +151,6 @@ approval_timeout_minutes: 5
 # Development Team (balanced):
 # allowed_commands:
 #   - name: jq
-#   - name: python3
 #   - name: pytest
 # blocked_commands:
 #   - aws      # Block production access

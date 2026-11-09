@@ -183,6 +183,54 @@ and treat them as authoritative context alongside the app spec:
     return section + prompt
 
 
+# When to invoke each bundled skill; other installed skills are listed by name only
+_SKILL_USE_HINTS = {
+    "ui-ux-pro-max": "before building or changing any user interface (pages, components, layout, styling, accessibility)",
+    "frontend-design": "when creating a new page or a new visual design",
+    "test-driven-development": "before writing the implementation code of a feature or bugfix",
+    "systematic-debugging": "when a test fails, a bug shows up or behaviour is unexpected, before attempting a fix",
+    "verification-before-completion": "before marking a feature passing or claiming any work is done",
+}
+
+# YOLO mode skips testing, so a test-first skill would contradict the session prompt
+_YOLO_SKIPPED_SKILLS = frozenset({"test-driven-development"})
+
+
+def with_project_skills(prompt: str, project_dir: Path | None, yolo_mode: bool = False) -> str:
+    """Prepend the project's installed skills and when to invoke them.
+
+    Agents only see a skill's short description, so without this pointer a
+    skill such as ui-ux-pro-max is easily skipped. ``playwright-cli`` is left
+    out: the prompts already tell the agent how to use it.
+    """
+    if project_dir is None:
+        return prompt
+    from project_skills import REQUIRED_SKILLS, list_project_skills
+
+    names = [
+        s["name"] for s in list_project_skills(project_dir)
+        if s["name"] not in REQUIRED_SKILLS and not (yolo_mode and s["name"] in _YOLO_SKIPPED_SKILLS)
+    ]
+    if not names:
+        return prompt
+
+    listing = "\n".join(
+        f"- `{name}`: {_SKILL_USE_HINTS[name]}" if name in _SKILL_USE_HINTS else f"- `{name}`"
+        for name in names
+    )
+    section = f"""## PROJECT SKILLS
+
+These skills are installed in `.claude/skills/`. Invoke a skill with the Skill tool as soon as
+its situation comes up, before doing that part of the work:
+
+{listing}
+
+---
+
+"""
+    return section + prompt
+
+
 def get_initializer_prompt(project_dir: Path | None = None) -> str:
     """Load the initializer prompt (project-specific if available)."""
     return load_prompt("initializer_prompt", project_dir)

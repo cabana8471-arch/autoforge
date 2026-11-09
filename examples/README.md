@@ -96,8 +96,8 @@ allowed_commands:
   - name: jq
     description: JSON processor
 
-  - name: python3
-    description: Python interpreter
+  - name: make
+    description: Build tool
 
 # Blocked across all projects (cannot be overridden)
 blocked_commands:
@@ -107,7 +107,7 @@ blocked_commands:
 ```
 
 **When to use:**
-- ✅ Multiple projects need the same tools (jq, python3, etc.)
+- ✅ Multiple projects need the same tools (jq, make, etc.)
 - ✅ Enforce organization-wide security policies
 - ✅ Block dangerous commands across all projects
 
@@ -270,8 +270,8 @@ blocked_commands:
 version: 1
 
 allowed_commands:
-  - name: python3
-    description: Python interpreter
+  - name: uv
+    description: Python package manager
   - name: jq
     description: JSON processor
   - name: pytest
@@ -456,7 +456,7 @@ python test_security_integration.py
 Tests:
 - Blocked commands are rejected (sudo, shutdown, etc.)
 - Default commands work (ls, git, npm, etc.)
-- Non-allowed commands are blocked (wget, python, etc.)
+- Non-allowed commands are blocked (wget, python, etc.; only `python3` is allowed)
 - Project config allows commands (swift, xcodebuild, etc.)
 - Pattern matching works (swift* matches swiftlint)
 - Org blocklist cannot be overridden

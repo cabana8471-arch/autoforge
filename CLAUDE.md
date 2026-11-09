@@ -153,6 +153,7 @@ python -m pytest test_usage_tracker.py        # Token/cost tracking tests
 python -m pytest test_billing_utils.py        # Spend safeguards: billing stop, run cap from usage records, cost of an aborted session
 python -m pytest test_spend_stop_status.py    # Exit codes 3/4 are "stopped" with a reason, never "crashed" (no scheduler restart)
 python -m pytest test_project_skills.py       # Project skills: library (no ~/.claude/skills), install/remove, planted links, Skill tool
+python -m pytest test_bundled_skills.py       # Third-party bundled skills adapted for agents, search script runs, PROJECT SKILLS prompt pointer
 python -m pytest test_github_issues.py        # GitHub issue import: parsing, endpoints, comments excluded by default, external authors need confirmation
 python -m pytest test_roadmap.py              # Backlog + maturity tags: ready checks, promote/backlog endpoints, scheduling order
 python -m pytest test_backlog_scheduling.py   # Backlog stays out of progress totals, stall reasons and completion message
@@ -210,7 +211,7 @@ The `autoforge` command is a Node.js wrapper that manages the Python environment
 - `requirements-prod.txt` - Runtime-only Python deps (excludes ruff, mypy, pytest)
 - `.npmignore` - Excludes dev files, tests, UI source from the published tarball
 
-Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publishes a ~1 MB tarball with ~145 files; `test_package_files.py` fails when shipped code imports a repo-root module that `files` omits)
+Publishing: `npm publish` (triggers `prepublishOnly` which builds UI, then publishes a ~1.8 MB tarball with ~230 files; `test_package_files.py` fails when shipped code imports a repo-root module that `files` omits)
 
 ### Core Python Modules
 
@@ -559,6 +560,8 @@ Alternative providers are configured via the **Settings UI** (gear icon > API Pr
 
 **Skills** (`.claude/skills/`):
 - `frontend-design` - Distinctive, production-grade UI design
+- `ui-ux-pro-max` - UI/UX design data and rules (styles, palettes, fonts, UX/accessibility guidelines), searched with `python3 .claude/skills/ui-ux-pro-max/scripts/search.py`
+- `test-driven-development`, `systematic-debugging`, `verification-before-completion` - from superpowers, adapted for agents with no human or subagents
 - `gsd-to-autoforge-spec` - Convert GSD codebase mapping to AutoForge app_spec format
 - `playwright-cli` - Browser automation via Playwright CLI (copied to each project)
 
@@ -578,6 +581,8 @@ Agents load skills from the project's `.claude/skills/` (they run with `setting_
 - Skills are picked at project creation (New Project > Choose Skills) or later via the wand button next to the agent controls.
 - Library sources, first match wins: `.claude/skills/` (bundled, minus `gsd-to-autoforge-spec`), `~/.autoforge/skills/`. The user's global `~/.claude/skills/` is not a source (user decision 2A). Symlinks inside library skills are not copied; project-side reads/writes/deletes go through `api/safe_project_io`.
 - `playwright-cli` is always installed and cannot be removed.
+- Every agent prompt starts with a `## PROJECT SKILLS` section naming the installed skills and when to invoke them (`prompts.with_project_skills`; `playwright-cli` left out, `test-driven-development` left out in YOLO mode), since agents otherwise see only a skill's short description.
+- Third-party bundled skills (sources, commits, adaptations, licenses): `.claude/skills/THIRD_PARTY_SKILLS.md`. `ui-ux-pro-max` needs `python3`, which is in the global allowlist (user decision 09.11.2026); its vendored scripts are excluded from ruff and mypy.
 - Agents cannot edit `.claude/skills/` (the CLI protects it from Edit and sandboxed Bash, checked live 08.11.2026), so installed skills are read-only references; #314's self-updating `project-learnings` skill was left out.
 
 ### Prompt Loading Fallback Chain

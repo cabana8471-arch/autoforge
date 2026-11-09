@@ -488,6 +488,7 @@ The repository's `.claude/` folder contains Claude Code skills and slash command
 | `commands/create-spec.md`, `commands/expand-project.md` | AutoForge's spec-creation and "expand project" chats | No - AutoForge reads them from its own install directory |
 | `templates/` | Initializer, coding, and testing agents | No - copied into each project's `.autoforge/prompts/` |
 | `skills/playwright-cli/` | Coding/testing agents (browser automation) | No - copied into each project's `.claude/skills/` automatically |
+| `skills/ui-ux-pro-max/`, `skills/test-driven-development/`, `skills/systematic-debugging/`, `skills/verification-before-completion/` | Coding/testing agents (UI design, test-first, debugging, verification) | No - pick them per project (New Project > Choose Skills, or the wand button) |
 | `commands/check-code.md`, `commands/checkpoint.md`, `commands/review-pr.md`, `skills/frontend-design/` | You, when working on the AutoForge source code | No - available automatically when you run `claude` inside the AutoForge repository |
 | `skills/gsd-to-autoforge-spec/`, `commands/gsd-to-autoforge-spec.md` | You, when onboarding an **existing** codebase | **Yes** - make it available to Claude Code in that project (see below) |
 

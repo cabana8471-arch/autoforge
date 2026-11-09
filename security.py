@@ -49,6 +49,8 @@ ALLOWED_COMMANDS = {
     "npx",
     "pnpm",  # Project uses pnpm
     "node",
+    # Python (bundled skills such as ui-ux-pro-max run python3 scripts); stdlib-only use, same sandbox as node
+    "python3",
     # Version control
     "git",
     # Docker (for PostgreSQL)

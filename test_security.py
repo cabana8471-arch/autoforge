@@ -820,8 +820,8 @@ def test_hierarchy_resolution():
 allowed_commands:
   - name: jq
     description: JSON processor
-  - name: python3
-    description: Python interpreter
+  - name: make
+    description: Build tool
 blocked_commands:
   - terraform
   - kubectl
@@ -841,13 +841,13 @@ commands:
 
                 # Test 1: Org allowed commands are included
                 allowed, blocked = get_effective_commands(project_dir)
-                if "jq" in allowed and "python3" in allowed:
+                if "jq" in allowed and "make" in allowed:
                     print("  PASS: Org allowed commands included")
                     passed += 1
                 else:
                     print("  FAIL: Org allowed commands included")
                     print(f"         jq in allowed: {'jq' in allowed}")
-                    print(f"         python3 in allowed: {'python3' in allowed}")
+                    print(f"         make in allowed: {'make' in allowed}")
                     failed += 1
 
                 # Test 2: Org blocked commands are in blocklist
@@ -1396,7 +1396,7 @@ def main():
         "reboot",
         # Not in allowlist - common commands excluded from minimal set
         "wget https://example.com",
-        "python app.py",
+        "python app.py",  # only python3 is allowed
         "killall node",
         # pkill with non-dev processes (pkill python tested in test_pkill_extensibility)
         "pkill bash",
@@ -1444,6 +1444,8 @@ def main():
         "npm install",
         "npm run build",
         "node server.js",
+        # Python (bundled ui-ux-pro-max skill)
+        "python3 .claude/skills/ui-ux-pro-max/scripts/search.py 'modal focus' --domain ux",
         # Version control
         "git status",
         "git commit -m 'test'",

@@ -5,6 +5,8 @@ version = "1.0.0"
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+# Vendored third-party skill scripts (ui-ux-pro-max, MIT), kept as upstream ships them
+extend-exclude = [".claude/skills/ui-ux-pro-max/scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
@@ -19,4 +21,4 @@ python_version = "3.11"
 ignore_missing_imports = true
 warn_return_any = true
 warn_unused_ignores = true
-exclude = ["^venv/"]
+exclude = ["^venv/", "^\\.claude/skills/ui-ux-pro-max/scripts/"]

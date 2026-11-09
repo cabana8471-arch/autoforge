@@ -63,10 +63,7 @@ commands: []
   # ==========================================
   # Python Development Example
   # ==========================================
-  # Uncomment these if building a Python project:
-
-  # - name: python3
-  #   description: Python 3 interpreter
+  # Uncomment these if building a Python project (python3 itself is allowed by default):
 
   # - name: pip3
   #   description: Python package installer
