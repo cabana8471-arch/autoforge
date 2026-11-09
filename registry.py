@@ -46,17 +46,22 @@ def _migrate_registry_dir() -> None:
 # Available models with display names
 # To add a new model: add an entry here with {"id": "model-id", "name": "Display Name"}
 AVAILABLE_MODELS = [
-    {"id": "claude-opus-4-7", "name": "Claude Opus"},
-    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet"},
+    {"id": "claude-opus-5-5", "name": "Claude Opus 5.5"},
+    {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5"},
+    {"id": "claude-haiku-5-5", "name": "Claude Haiku 5.5"},
+    {"id": "claude-fable-5-1", "name": "Claude Fable 5.1 (highest cost)"},
 ]
 
 # Map legacy model IDs to their current replacements.
 # Used by get_all_settings() to auto-migrate stale values on first read after upgrade.
 LEGACY_MODEL_MAP = {
-    "claude-opus-4-5-20251101": "claude-opus-4-7",
-    "claude-opus-4-6": "claude-opus-4-7",
-    "claude-sonnet-4-5": "claude-sonnet-4-6",
-    "claude-sonnet-4-5-20250929": "claude-sonnet-4-6",
+    "claude-opus-4-5-20251101": "claude-opus-5-5",
+    "claude-opus-4-6": "claude-opus-5-5",
+    "claude-opus-4-7": "claude-opus-5-5",
+    "claude-sonnet-4-5": "claude-sonnet-5-5",
+    "claude-sonnet-4-5-20250929": "claude-sonnet-5-5",
+    "claude-sonnet-4-6": "claude-sonnet-5-5",
+    "claude-haiku-4-5": "claude-haiku-5-5",
 }
 
 # List of valid model IDs (derived from AVAILABLE_MODELS)
@@ -68,7 +73,7 @@ VALID_MODELS = [m["id"] for m in AVAILABLE_MODELS]
 _env_default_model = os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL")
 if _env_default_model is not None:
     _env_default_model = _env_default_model.strip()
-# Auto-remap stale env-provided values (e.g. user's .env still pins 4.6)
+# Auto-remap stale env-provided values (e.g. user's .env still pins 4.7)
 if _env_default_model and _env_default_model in LEGACY_MODEL_MAP:
     logging.getLogger(__name__).warning(
         "ANTHROPIC_DEFAULT_OPUS_MODEL=%s is legacy; remapping to %s. "
@@ -76,7 +81,7 @@ if _env_default_model and _env_default_model in LEGACY_MODEL_MAP:
         _env_default_model, LEGACY_MODEL_MAP[_env_default_model],
     )
     _env_default_model = LEGACY_MODEL_MAP[_env_default_model]
-DEFAULT_MODEL = _env_default_model or "claude-opus-4-7"
+DEFAULT_MODEL = _env_default_model or "claude-opus-5-5"
 
 # Ensure env-provided DEFAULT_MODEL is in VALID_MODELS for validation consistency
 # (idempotent: only adds if missing, doesn't alter AVAILABLE_MODELS semantics)
@@ -751,7 +756,7 @@ def get_all_settings() -> dict[str, str]:
     """
     Get all settings as a dictionary.
 
-    Automatically migrates legacy model IDs (e.g. claude-opus-4-6 -> claude-opus-4-7)
+    Automatically migrates legacy model IDs (e.g. claude-opus-4-7 -> claude-opus-5-5)
     on first read after upgrade. This is a one-time silent migration.
 
     Returns:
@@ -798,11 +803,8 @@ API_PROVIDERS: dict[str, dict[str, Any]] = {
         "name": "Claude (Anthropic)",
         "base_url": None,
         "requires_auth": False,
-        "models": [
-            {"id": "claude-opus-4-7", "name": "Claude Opus"},
-            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet"},
-        ],
-        "default_model": "claude-opus-4-7",
+        "models": AVAILABLE_MODELS,
+        "default_model": "claude-opus-5-5",
     },
     # Kimi Code subscription (keys created at kimi.com, usually prefixed "sk-kimi-").
     # Platform keys from platform.moonshot.ai are rejected here with a 401; use "moonshot".
@@ -849,11 +851,11 @@ API_PROVIDERS: dict[str, dict[str, Any]] = {
         "requires_auth": True,
         "auth_env_var": "ANTHROPIC_API_KEY",
         "models": [
-            {"id": "claude-opus-4-7", "name": "Claude Opus"},
-            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet"},
-            {"id": "claude-haiku-4-5", "name": "Claude Haiku"},
+            {"id": "claude-opus-5-5", "name": "Claude Opus 5.5"},
+            {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5"},
+            {"id": "claude-haiku-5-5", "name": "Claude Haiku 5.5"},
         ],
-        "default_model": "claude-opus-4-7",
+        "default_model": "claude-opus-5-5",
     },
     "ollama": {
         "name": "Ollama (Local)",

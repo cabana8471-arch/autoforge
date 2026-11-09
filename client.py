@@ -134,7 +134,7 @@ def convert_model_for_vertex(model: str) -> str:
 
     Vertex AI uses @ to separate model name from version (e.g., claude-sonnet-4-5@20250929)
     while the Anthropic API uses - (e.g., claude-sonnet-4-5-20250929).
-    Models without a date suffix (e.g., claude-opus-4-7) pass through unchanged.
+    Models without a date suffix (e.g., claude-opus-5-5) pass through unchanged.
 
     Args:
         model: Model name in Anthropic format (with hyphens)
@@ -173,7 +173,7 @@ def resolve_model_for_alternative_api(model: str, sdk_env: dict[str, str]) -> st
 
     The Claude CLI only applies ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL to
     tier aliases ("opus", "sonnet"), not to full model IDs like
-    "claude-opus-4-7". Since AutoForge always passes a full Claude ID, endpoints
+    "claude-opus-5-5". Since AutoForge always passes a full Claude ID, endpoints
     such as Ollama or a custom proxy would otherwise receive a model they don't
     serve and fail with a 404. When ANTHROPIC_BASE_URL is set (and Vertex AI is
     not in use), a Claude model ID is replaced with the matching tier override.

@@ -133,6 +133,7 @@ python -m pytest test_spec_readers_path.py    # Spec readers resolve .autoforge/
 python -m pytest test_manual_testing.py       # Manual Testing lane: state, blocking, verdict endpoint, MCP tool
 python -m pytest test_feature_update.py        # Editing features, incl. reopening completed ones
 python -m pytest test_testing_model.py         # Separate model for testing agents (CLI, settings, UI start)
+python -m pytest test_model_registry.py        # Claude model list (current generation), legacy ID migration, UI placeholder defaults
 python -m pytest test_feature_report_bug.py    # Assistant bug reports reopen the existing feature
 python -m pytest test_spec_conversation_summary.py  # Spec chat transcript (spec_input_summary.md)
 python -m pytest test_test_evidence.py         # Test evidence: screenshot copies, symlink safety, pruning, endpoint
@@ -521,12 +522,12 @@ Run coding agents via Google Cloud Vertex AI:
    CLAUDE_CODE_USE_VERTEX=1
    CLOUD_ML_REGION=us-east5
    ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id
-   ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-6
-   ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-5@20250929
-   ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-3-5-haiku@20241022
+   ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5
+   ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5-5
+   ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-5-5
    ```
 
-**Note:** Use `@` instead of `-` in model names for Vertex AI.
+**Note:** Current models use the plain ID on Vertex AI; only date-suffixed IDs take `@` instead of `-` (e.g. `claude-opus-4-5@20251101`).
 
 ### Alternative API Providers (GLM, Ollama, Kimi, Gemini, Custom)
 

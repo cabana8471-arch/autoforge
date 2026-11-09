@@ -75,7 +75,7 @@ Examples:
   python autonomous_agent_demo.py --project-dir my-app --testing-ratio 2
 
   # Use Opus for coding agents and Sonnet for testing agents
-  python autonomous_agent_demo.py --project-dir my-app --model claude-opus-4-7 --testing-model claude-sonnet-4-6
+  python autonomous_agent_demo.py --project-dir my-app --model claude-opus-5-5 --testing-model claude-sonnet-5-5
 
   # Disable testing agents (similar to YOLO but with verification)
   python autonomous_agent_demo.py --project-dir my-app --testing-ratio 0

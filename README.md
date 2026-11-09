@@ -456,12 +456,12 @@ Add these variables to your `.env` file to run agents via Google Cloud Vertex AI
 CLAUDE_CODE_USE_VERTEX=1
 CLOUD_ML_REGION=us-east5
 ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id
-ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-6
-ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-5@20250929
-ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-3-5-haiku@20241022
+ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5
+ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5-5
+ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-5-5
 ```
 
-Requires `gcloud auth application-default login` first. Note the `@` separator (not `-`) in Vertex AI model names.
+Requires `gcloud auth application-default login` first. Current models use the plain ID on Vertex AI; only date-suffixed IDs take the `@` separator (e.g. `claude-opus-4-5@20251101`).
 
 ---
 

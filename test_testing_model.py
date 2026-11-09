@@ -52,17 +52,17 @@ class TestOrchestratorTestingModel(unittest.TestCase):
         return testing_cmd, coding_cmd
 
     def test_testing_model_defaults_to_coding_model(self):
-        orch = self._make(model="claude-opus-4-7")
-        self.assertEqual(orch.testing_model, "claude-opus-4-7")
+        orch = self._make(model="claude-opus-5-5")
+        self.assertEqual(orch.testing_model, "claude-opus-5-5")
         testing_cmd, coding_cmd = self._spawn_cmds(orch)
-        self.assertEqual(_model_arg(testing_cmd), "claude-opus-4-7")
-        self.assertEqual(_model_arg(coding_cmd), "claude-opus-4-7")
+        self.assertEqual(_model_arg(testing_cmd), "claude-opus-5-5")
+        self.assertEqual(_model_arg(coding_cmd), "claude-opus-5-5")
 
     def test_separate_testing_model(self):
-        orch = self._make(model="claude-opus-4-7", testing_model="claude-sonnet-4-6")
+        orch = self._make(model="claude-opus-5-5", testing_model="claude-sonnet-5-5")
         testing_cmd, coding_cmd = self._spawn_cmds(orch)
-        self.assertEqual(_model_arg(testing_cmd), "claude-sonnet-4-6")
-        self.assertEqual(_model_arg(coding_cmd), "claude-opus-4-7")
+        self.assertEqual(_model_arg(testing_cmd), "claude-sonnet-5-5")
+        self.assertEqual(_model_arg(coding_cmd), "claude-opus-5-5")
 
 
 class TestTestingModelSetting(unittest.TestCase):
@@ -79,16 +79,16 @@ class TestTestingModelSetting(unittest.TestCase):
         self.assertIsNone(self._resolve({"testing_model": ""}))
 
     def test_valid_model_returned(self):
-        self.assertEqual(self._resolve({"testing_model": "claude-sonnet-4-6"}), "claude-sonnet-4-6")
+        self.assertEqual(self._resolve({"testing_model": "claude-sonnet-5-5"}), "claude-sonnet-5-5")
 
     def test_legacy_model_migrated(self):
-        self.assertEqual(self._resolve({"testing_model": "claude-sonnet-4-5"}), "claude-sonnet-4-6")
+        self.assertEqual(self._resolve({"testing_model": "claude-sonnet-4-5"}), "claude-sonnet-5-5")
 
     def test_unknown_model_ignored(self):
         self.assertIsNone(self._resolve({"testing_model": "not-a-model"}))
 
     def test_ignored_for_alternative_provider(self):
-        self.assertIsNone(self._resolve({"testing_model": "claude-sonnet-4-6", "api_provider": "glm"}))
+        self.assertIsNone(self._resolve({"testing_model": "claude-sonnet-5-5", "api_provider": "glm"}))
 
 
 class TestSettingsSchemas(unittest.TestCase):
@@ -96,7 +96,7 @@ class TestSettingsSchemas(unittest.TestCase):
         from server.schemas import SettingsUpdate
 
         self.assertEqual(SettingsUpdate(testing_model="").testing_model, "")
-        self.assertEqual(SettingsUpdate(testing_model="claude-sonnet-4-6").testing_model, "claude-sonnet-4-6")
+        self.assertEqual(SettingsUpdate(testing_model="claude-sonnet-5-5").testing_model, "claude-sonnet-5-5")
 
     def test_settings_update_rejects_unknown_model(self):
         from pydantic import ValidationError
@@ -142,21 +142,21 @@ def _flag(cmd: list[str], name: str) -> str | None:
 
 
 def test_ui_start_uses_global_testing_model(tmp_path, monkeypatch):
-    cmd = _ui_start_cmd(tmp_path, monkeypatch, "claude-sonnet-4-6", model="claude-opus-4-7")
-    assert _flag(cmd, "--model") == "claude-opus-4-7"
-    assert _flag(cmd, "--testing-model") == "claude-sonnet-4-6"
+    cmd = _ui_start_cmd(tmp_path, monkeypatch, "claude-sonnet-5-5", model="claude-opus-5-5")
+    assert _flag(cmd, "--model") == "claude-opus-5-5"
+    assert _flag(cmd, "--testing-model") == "claude-sonnet-5-5"
 
 
 def test_ui_start_request_overrides_global_testing_model(tmp_path, monkeypatch):
-    cmd = _ui_start_cmd(tmp_path, monkeypatch, "claude-sonnet-4-6",
-                        model="claude-opus-4-7", testing_model="claude-haiku-4-5")
-    assert _flag(cmd, "--testing-model") == "claude-haiku-4-5"
+    cmd = _ui_start_cmd(tmp_path, monkeypatch, "claude-sonnet-5-5",
+                        model="claude-opus-5-5", testing_model="claude-haiku-5-5")
+    assert _flag(cmd, "--testing-model") == "claude-haiku-5-5"
 
 
 def test_ui_start_omits_flag_when_testing_model_matches_or_unset(tmp_path, monkeypatch):
-    assert "--testing-model" not in _ui_start_cmd(tmp_path, monkeypatch, None, model="claude-opus-4-7")
+    assert "--testing-model" not in _ui_start_cmd(tmp_path, monkeypatch, None, model="claude-opus-5-5")
     assert "--testing-model" not in _ui_start_cmd(
-        tmp_path / "b", monkeypatch, "claude-opus-4-7", model="claude-opus-4-7")
+        tmp_path / "b", monkeypatch, "claude-opus-5-5", model="claude-opus-5-5")
 
 
 if __name__ == "__main__":

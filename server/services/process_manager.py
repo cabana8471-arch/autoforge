@@ -405,7 +405,7 @@ class AgentProcessManager:
 
         Args:
             yolo_mode: If True, run in YOLO mode (skip testing agents)
-            model: Model to use (e.g., claude-opus-4-6)
+            model: Model to use (e.g., claude-opus-5-5)
             parallel_mode: DEPRECATED - ignored, always uses unified orchestrator
             max_concurrency: Max concurrent coding agents (1-5, default 1)
             testing_agent_ratio: Number of regression testing agents (0-3, default 1)
