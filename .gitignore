@@ -87,6 +87,8 @@ dmypy.json
 # Claude Code
 # ===================
 .claude/settings.local.json
+# Git worktrees created for isolated subagents
+.claude/worktrees/
 
 # ===================
 # IDE / Editors
